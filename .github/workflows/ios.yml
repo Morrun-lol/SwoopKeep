@@ -1,5 +1,5 @@
 
-name: iOS Build (Fix SPM & Signing)
+name: iOS Build (Generic Simulator Fix v3)
 
 on:
   push:
@@ -37,11 +37,6 @@ jobs:
       with:
         xcode-version: 'latest-stable'
         
-    - name: Inspect Project
-      run: |
-        cd ios/App
-        xcodebuild -list -project App.xcodeproj
-        
     - name: Remove Development Team
       run: |
         cd ios/App
@@ -55,11 +50,10 @@ jobs:
     - name: Build for Simulator
       run: |
         cd ios/App
-        # Using iPhone 15 as a safe default for latest Xcode
         xcodebuild -project App.xcodeproj \
           -scheme App \
           -configuration Release \
-          -destination 'platform=iOS Simulator,name=iPhone 15' \
+          -destination 'generic/platform=iOS Simulator' \
           -derivedDataPath build/DerivedData \
           -clonedSourcePackagesDirPath build/spm \
           CODE_SIGN_IDENTITY="" \
