@@ -1,0 +1,16 @@
+{
+  "name": "春节祝福",
+  "appid": "",
+  "description": "春节祝福小程序",
+  "versionName": "1.0.0",
+  "versionCode": "100",
+  "transformPx": false,
+  "mp-weixin": {
+    "appid": "touristappid",
+    "setting": {
+      "urlCheck": false
+    },
+    "usingComponents": true
+  },
+  "vueVersion": "3"
+}

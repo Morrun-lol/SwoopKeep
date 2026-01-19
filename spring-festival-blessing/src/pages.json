@@ -1,0 +1,40 @@
+{
+  "pages": [
+    {
+      "path": "pages/index/index",
+      "style": {
+        "navigationBarTitleText": "Spring Festival Blessing"
+      }
+    },
+    {
+      "path": "pages/login/index",
+      "style": {
+        "navigationBarTitleText": "Login"
+      }
+    },
+    {
+      "path": "pages/profile/index",
+      "style": {
+        "navigationBarTitleText": "Customize"
+      }
+    },
+    {
+      "path": "pages/preview/index",
+      "style": {
+        "navigationBarTitleText": "Preview"
+      }
+    },
+    {
+      "path": "pages/works/index",
+      "style": {
+        "navigationBarTitleText": "My Works"
+      }
+    }
+  ],
+  "globalStyle": {
+    "navigationBarTextStyle": "black",
+    "navigationBarTitleText": "Blessing App",
+    "navigationBarBackgroundColor": "#F8F8F8",
+    "backgroundColor": "#F8F8F8"
+  }
+}
