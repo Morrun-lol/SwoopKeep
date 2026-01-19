@@ -1,5 +1,5 @@
 
-name: iOS Build (Manual IPA)
+name: iOS Build (Manual IPA v2)
 
 on:
   push:
