@@ -1,5 +1,5 @@
 
-name: iOS Build
+name: iOS Build (Final Node 22 Fix)
 
 on:
   push:
@@ -17,7 +17,18 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '18'
+        node-version: '22.13.0'
+        check-latest: true
+        cache: 'npm'
+        
+    - name: Check Node Version
+      run: |
+        echo "Node version:"
+        node -v
+        echo "NPM version:"
+        npm -v
+        echo "Which node:"
+        which node
         
     - name: Install Dependencies
       run: npm install
