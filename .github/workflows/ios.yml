@@ -1,5 +1,5 @@
 
-name: iOS Build (Target iOS 15)
+name: iOS Build (Workspace Generation)
 
 on:
   push:
@@ -30,8 +30,7 @@ jobs:
     - name: Setup Capacitor & Pods
       run: |
         npm install @capacitor/cli @capacitor/core @capacitor/ios
-        # Ensure Podfile exists and force update
-        ls -la ios/App/
+        # Run sync which generates the workspace
         npx cap sync ios
         
     - name: Setup Xcode
@@ -47,7 +46,16 @@ jobs:
     - name: Build for Simulator (iOS 15)
       run: |
         cd ios/App
-        xcodebuild -workspace App.xcworkspace \
+        # Check if workspace exists
+        if [ -d "App.xcworkspace" ]; then
+          echo "Workspace found, building with workspace..."
+          BUILD_CMD="-workspace App.xcworkspace"
+        else
+          echo "Workspace NOT found, building with project..."
+          BUILD_CMD="-project App.xcodeproj"
+        fi
+        
+        xcodebuild $BUILD_CMD \
           -scheme App \
           -configuration Release \
           -destination 'generic/platform=iOS Simulator' \
