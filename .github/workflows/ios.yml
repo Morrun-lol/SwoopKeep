@@ -1,5 +1,5 @@
 
-name: iOS Build (Final Node 22 Fix)
+name: iOS Build (Manual IPA)
 
 on:
   push:
@@ -50,7 +50,11 @@ jobs:
       run: |
         cd ios/App
         xcodebuild -workspace App.xcworkspace -scheme App -clean archive -archivePath build/App.xcarchive CODE_SIGN_IDENTITY="" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO
-        xcodebuild -exportArchive -archivePath build/App.xcarchive -exportOptionsPlist App/exportOptions.plist -exportPath build/ipa
+        mkdir -p build/ipa/Payload
+        cp -r build/App.xcarchive/Products/Applications/App.app build/ipa/Payload/
+        cd build/ipa
+        zip -r App.ipa Payload
+        rm -rf Payload
         
     - name: Upload IPA
       uses: actions/upload-artifact@v4
