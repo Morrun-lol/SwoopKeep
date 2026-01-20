@@ -104,6 +104,9 @@ jobs:
         echo "Syncing Podfile.lock to Manifest.lock..."
         cp Podfile.lock Pods/Manifest.lock
         
+        # Debug: List files to ensure config and Pods exist
+        ls -R .
+        
         xcodebuild -workspace App.xcworkspace \
           -scheme App \
           -configuration Debug \
