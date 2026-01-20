@@ -1,5 +1,5 @@
 
-name: iOS Build (Remove SPM)
+name: iOS Build (Podfile Fix)
 
 on:
   push:
@@ -30,9 +30,11 @@ jobs:
     - name: Setup Capacitor & Pods
       run: |
         npm install @capacitor/cli @capacitor/core @capacitor/ios
-        # Force remove any SPM leftovers
         rm -rf ios/App/CapApp-SPM
-        npx cap sync ios
+        # Do not run npx cap sync here, as it might overwrite our custom Podfile
+        # Instead, we run pod install directly
+        cd ios/App
+        pod install
         
     - name: Setup Xcode
       uses: maxim-lobanov/setup-xcode@v1
@@ -70,13 +72,11 @@ jobs:
         cd ios/App
         rm -rf build/DerivedData
         
-        # Ensure we are using workspace (CocoaPods)
         if [ ! -d "App.xcworkspace" ]; then
           echo "Error: Workspace not found! CocoaPods install failed."
           exit 1
         fi
         
-        # Disable SPM explicitly in build args
         xcodebuild -workspace App.xcworkspace \
           -scheme App \
           -configuration Debug \
