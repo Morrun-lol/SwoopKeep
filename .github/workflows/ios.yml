@@ -30,6 +30,8 @@ jobs:
     - name: Setup Capacitor & Pods
       run: |
         npm install @capacitor/cli @capacitor/core @capacitor/ios
+        # Ensure web assets are synced to native ios/App/App/public
+        npx cap sync ios
         rm -rf ios/App/CapApp-SPM
         rm -f ios/App/Podfile.lock
         cd ios/App
