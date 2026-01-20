@@ -92,26 +92,28 @@ jobs:
         
     - name: Build for Simulator (Debug)
       run: |
+        # We are already in project root.
+        # But wait, previous steps might have changed dir context if not careful?
+        # Actually, each 'run' block starts fresh from workspace root.
+        
+        echo "Current directory: $(pwd)"
+        ls -F
+        
         cd ios/App
         rm -rf build/DerivedData
         
         if [ ! -d "App.xcworkspace" ]; then
           echo "Error: Workspace not found! CocoaPods install failed."
+          # Debug: list what IS here
+          ls -R .
           exit 1
         fi
         
-        # Hack: Force Manifest.lock to match Podfile.lock to prevent "The sandbox is not in sync" error
+        # Hack: Force Manifest.lock to match Podfile.lock
         echo "Syncing Podfile.lock to Manifest.lock..."
         cp Podfile.lock Pods/Manifest.lock
         
-        # Debug: List files to ensure config and Pods exist
-        # Note: We are already in the project root, so we check ios/App/Pods
-        ls -R ios/App/Pods || echo "Pods dir not found at expected path"
-        
         # Dynamically inject the correct Pods config path into debug.xcconfig
-        # This handles any potential path mismatches or generation variations
-        cd ios/App
-        # Use a more relaxed find to locate the config file anywhere under Pods
         PODS_CONFIG_PATH=$(find Pods -name "Pods-App.debug.xcconfig" | head -n 1)
         if [ -n "$PODS_CONFIG_PATH" ]; then
           echo "Found Pods config at: $PODS_CONFIG_PATH"
@@ -120,6 +122,8 @@ jobs:
           cat debug.xcconfig
         else
           echo "Error: Could not find Pods-App.debug.xcconfig!"
+          # Don't exit yet, let's list Pods to see what happened
+          find Pods -maxdepth 3
           exit 1
         fi
         
