@@ -1,0 +1,11 @@
+[33mcommit bfe1f0ad1c0d1ac1087c252172e6bb906fd87020[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmaster[m[33m, [m[1;31morigin/master[m[33m)[m
+Author: Trae Assistant <trae@example.com>
+Date:   Tue Jan 20 02:35:46 2026 +0800
+
+    ci: upgrade actions to v4 to fix deprecation error
+
+[33mcommit 367e4600aa536e0f9342966dbadb024294c1731e[m
+Author: Trae Assistant <trae@example.com>
+Date:   Tue Jan 20 02:33:10 2026 +0800
+
+    feat: Complete iOS migration and Mobile UI optimization

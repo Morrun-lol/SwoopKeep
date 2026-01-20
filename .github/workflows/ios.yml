@@ -1,5 +1,5 @@
 
-name: iOS Build (Podfile Fix)
+name: iOS Build (Clean Project)
 
 on:
   push:
@@ -31,8 +31,6 @@ jobs:
       run: |
         npm install @capacitor/cli @capacitor/core @capacitor/ios
         rm -rf ios/App/CapApp-SPM
-        # Do not run npx cap sync here, as it might overwrite our custom Podfile
-        # Instead, we run pod install directly
         cd ios/App
         pod install
         
