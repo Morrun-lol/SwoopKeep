@@ -1,5 +1,5 @@
 
-name: iOS Build (Static Linkage Fix)
+name: iOS Build (Main Storyboard Fix)
 
 on:
   push:
@@ -66,10 +66,8 @@ jobs:
     - name: Build for Simulator (Debug)
       run: |
         cd ios/App
-        # Clean derived data first to avoid stale PCMs
         rm -rf build/DerivedData
         
-        # Using Debug configuration as it is more lenient with signing
         if [ -d "App.xcworkspace" ]; then
           echo "Workspace found, building with workspace..."
           BUILD_CMD="-workspace App.xcworkspace"
