@@ -99,10 +99,9 @@ jobs:
         SOURCE_ICON="AppIcon-512@2x.png"
         
         create_icon() {
-            if [ ! -f "$1" ]; then
-                echo "Creating missing icon: $1 from $SOURCE_ICON"
-                cp "$SOURCE_ICON" "$1"
-            fi
+            # Always overwrite to ensure freshness and correctness
+            echo "Generating icon: $1 from $SOURCE_ICON"
+            cp "$SOURCE_ICON" "$1"
         }
         
         # Generate all referenced icons
@@ -146,9 +145,9 @@ jobs:
           exit 1
         fi
         
-        # Hack: Force Manifest.lock to match Podfile.lock
-        echo "Syncing Podfile.lock to Manifest.lock..."
-        cp Podfile.lock Pods/Manifest.lock
+        # NOTE: Removed "Hack: Force Manifest.lock to match Podfile.lock"
+        # We rely on 'pod install' to have done its job correctly.
+        # If pods are out of sync, we WANT it to fail or (better) we fixed it by running pod install above.
         
         # Dynamically inject the correct Pods config path into debug.xcconfig
         PODS_CONFIG_PATH=$(find Pods -name "Pods-App.debug.xcconfig" | head -n 1)
