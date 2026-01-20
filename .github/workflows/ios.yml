@@ -31,6 +31,7 @@ jobs:
       run: |
         npm install @capacitor/cli @capacitor/core @capacitor/ios
         rm -rf ios/App/CapApp-SPM
+        rm -f ios/App/Podfile.lock
         cd ios/App
         pod install
         
@@ -74,6 +75,10 @@ jobs:
           echo "Error: Workspace not found! CocoaPods install failed."
           exit 1
         fi
+        
+        # Hack: Force Manifest.lock to match Podfile.lock to prevent "The sandbox is not in sync" error
+        echo "Syncing Podfile.lock to Manifest.lock..."
+        cp Podfile.lock Pods/Manifest.lock
         
         xcodebuild -workspace App.xcworkspace \
           -scheme App \
