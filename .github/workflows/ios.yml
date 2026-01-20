@@ -149,19 +149,9 @@ jobs:
         # We rely on 'pod install' to have done its job correctly.
         # If pods are out of sync, we WANT it to fail or (better) we fixed it by running pod install above.
         
-        # Dynamically inject the correct Pods config path into debug.xcconfig
-        PODS_CONFIG_PATH=$(find Pods -name "Pods-App.debug.xcconfig" | head -n 1)
-        if [ -n "$PODS_CONFIG_PATH" ]; then
-          echo "Found Pods config at: $PODS_CONFIG_PATH"
-          echo "#include \"$PODS_CONFIG_PATH\"" > debug.xcconfig
-          echo "Updated debug.xcconfig content:"
-          cat debug.xcconfig
-        else
-          echo "Error: Could not find Pods-App.debug.xcconfig!"
-          # Don't exit yet, let's list Pods to see what happened
-          find Pods -maxdepth 3
-          exit 1
-        fi
+        # We also removed the dynamic injection of debug.xcconfig
+        # because we now rely on 'pod install' to link the correct Pods-App.debug.xcconfig
+        # by having cleared the baseConfigurationReference previously.
         
         xcodebuild -workspace App.xcworkspace \
           -scheme App \
@@ -173,7 +163,8 @@ jobs:
           CODE_SIGNING_REQUIRED=NO \
           CODE_SIGNING_ALLOWED=NO \
           COMPILER_INDEX_STORE_ENABLE=NO \
-          SWIFT_ENABLE_EXPLICIT_MODULES=NO
+          SWIFT_ENABLE_EXPLICIT_MODULES=NO \
+          ENABLE_USER_SCRIPT_SANDBOXING=NO
         
     - name: Package Simulator App
       run: |
