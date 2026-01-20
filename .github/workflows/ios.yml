@@ -105,7 +105,21 @@ jobs:
         cp Podfile.lock Pods/Manifest.lock
         
         # Debug: List files to ensure config and Pods exist
-        ls -R .
+        ls -R ios/App/Pods/Target\ Support\ Files
+        
+        # Dynamically inject the correct Pods config path into debug.xcconfig
+        # This handles any potential path mismatches or generation variations
+        cd ios/App
+        PODS_CONFIG_PATH=$(find Pods -name "Pods-App.debug.xcconfig" | head -n 1)
+        if [ -n "$PODS_CONFIG_PATH" ]; then
+          echo "Found Pods config at: $PODS_CONFIG_PATH"
+          echo "#include \"$PODS_CONFIG_PATH\"" > debug.xcconfig
+          echo "Updated debug.xcconfig content:"
+          cat debug.xcconfig
+        else
+          echo "Error: Could not find Pods-App.debug.xcconfig!"
+          exit 1
+        fi
         
         xcodebuild -workspace App.xcworkspace \
           -scheme App \
