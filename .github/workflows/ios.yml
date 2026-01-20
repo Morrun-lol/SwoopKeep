@@ -153,6 +153,12 @@ jobs:
         # because we now rely on 'pod install' to link the correct Pods-App.debug.xcconfig
         # by having cleared the baseConfigurationReference previously.
         
+        # DEBUG: List the generated Pods configs to confirm they exist
+        ls -R Pods/Target\ Support\ Files
+        
+        # DEBUG: Check project.pbxproj to see if CocoaPods actually updated it
+        grep "baseConfigurationReference" App.xcodeproj/project.pbxproj || echo "WARNING: No baseConfigurationReference found!"
+        
         xcodebuild -workspace App.xcworkspace \
           -scheme App \
           -configuration Debug \
