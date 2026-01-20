@@ -1,5 +1,5 @@
 
-name: iOS Build (Workspace Generation)
+name: iOS Build (Asset Catalog Fix)
 
 on:
   push:
@@ -55,6 +55,7 @@ jobs:
           BUILD_CMD="-project App.xcodeproj"
         fi
         
+        # Adding COMPILER_INDEX_STORE_ENABLE=NO to speed up and reduce errors
         xcodebuild $BUILD_CMD \
           -scheme App \
           -configuration Release \
@@ -63,7 +64,8 @@ jobs:
           IPHONEOS_DEPLOYMENT_TARGET=15.0 \
           CODE_SIGN_IDENTITY="" \
           CODE_SIGNING_REQUIRED=NO \
-          CODE_SIGNING_ALLOWED=NO
+          CODE_SIGNING_ALLOWED=NO \
+          COMPILER_INDEX_STORE_ENABLE=NO
         
     - name: Package Simulator App
       run: |
