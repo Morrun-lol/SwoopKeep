@@ -1,5 +1,5 @@
 
-name: iOS Build (Asset Catalog Fix)
+name: iOS Build (Nuclear Signing Fix)
 
 on:
   push:
@@ -30,7 +30,6 @@ jobs:
     - name: Setup Capacitor & Pods
       run: |
         npm install @capacitor/cli @capacitor/core @capacitor/ios
-        # Run sync which generates the workspace
         npx cap sync ios
         
     - name: Setup Xcode
@@ -38,15 +37,36 @@ jobs:
       with:
         xcode-version: 'latest-stable'
         
+    - name: Generate Missing Icons
+      run: |
+        cd ios/App/App/Assets.xcassets/AppIcon.appiconset
+        create_icon() {
+            if [ ! -f "$1" ]; then
+                echo "Creating missing icon: $1"
+                cp AppIcon-512@2x.png "$1"
+            fi
+        }
+        create_icon "AppIcon-20x20@2x.png"
+        create_icon "AppIcon-20x20@3x.png"
+        create_icon "AppIcon-29x29@2x.png"
+        create_icon "AppIcon-29x29@3x.png"
+        create_icon "AppIcon-40x40@2x.png"
+        create_icon "AppIcon-40x40@3x.png"
+        create_icon "AppIcon-60x60@2x.png"
+        create_icon "AppIcon-60x60@3x.png"
+        create_icon "AppIcon-76x76@1x.png"
+        create_icon "AppIcon-76x76@2x.png"
+        create_icon "AppIcon-83.5x83.5@2x.png"
+        
     - name: Remove Development Team
       run: |
         cd ios/App
         sed -i '' 's/DEVELOPMENT_TEAM = .*/DEVELOPMENT_TEAM = "";/g' App.xcodeproj/project.pbxproj
         
-    - name: Build for Simulator (iOS 15)
+    - name: Build for Simulator (Debug)
       run: |
         cd ios/App
-        # Check if workspace exists
+        # Using Debug configuration as it is more lenient with signing
         if [ -d "App.xcworkspace" ]; then
           echo "Workspace found, building with workspace..."
           BUILD_CMD="-workspace App.xcworkspace"
@@ -55,10 +75,9 @@ jobs:
           BUILD_CMD="-project App.xcodeproj"
         fi
         
-        # Adding COMPILER_INDEX_STORE_ENABLE=NO to speed up and reduce errors
         xcodebuild $BUILD_CMD \
           -scheme App \
-          -configuration Release \
+          -configuration Debug \
           -destination 'generic/platform=iOS Simulator' \
           -derivedDataPath build/DerivedData \
           IPHONEOS_DEPLOYMENT_TARGET=15.0 \
@@ -70,12 +89,12 @@ jobs:
     - name: Package Simulator App
       run: |
         cd ios/App
-        # Compress the .app for Simulator
-        cd build/DerivedData/Build/Products/Release-iphonesimulator
+        # Compress the .app for Simulator (Debug folder)
+        cd build/DerivedData/Build/Products/Debug-iphonesimulator
         zip -r App-Simulator.zip App.app
         
     - name: Upload Simulator App
       uses: actions/upload-artifact@v4
       with:
         name: app-simulator
-        path: ios/App/build/DerivedData/Build/Products/Release-iphonesimulator/App-Simulator.zip
+        path: ios/App/build/DerivedData/Build/Products/Debug-iphonesimulator/App-Simulator.zip
