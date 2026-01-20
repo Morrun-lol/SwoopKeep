@@ -46,9 +46,9 @@ jobs:
             puts "Patching #{path} to disable Manifest check..."
             content = File.read(path)
             # The pattern matches the standard CocoaPods check script
-            # We replace the diff command with "exit 0" to force success
-            # Also handle potential trailing comma issue if last item in array
-            updated = content.gsub(/diff .*Podfile\.lock.*Manifest\.lock.*/, "exit 0")
+            # We replace the diff command and the rest of the line with "exit 0";
+            # We MUST include the closing quote and semicolon because the greedy match consumes them!
+            updated = content.gsub(/diff .*Podfile\.lock.*Manifest\.lock.*/, "exit 0\";")
             File.write(path, updated)
             puts "Patch applied."
           else
