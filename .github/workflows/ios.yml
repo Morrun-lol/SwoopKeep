@@ -84,6 +84,7 @@ jobs:
         create_icon "AppIcon-76x76@1x.png"
         create_icon "AppIcon-76x76@2x.png"
         create_icon "AppIcon-83.5x83.5@2x.png"
+        create_icon "AppIcon-1024x1024.png"
         
     - name: Remove Development Team
       run: |
