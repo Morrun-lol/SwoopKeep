@@ -1,5 +1,5 @@
 
-name: iOS Build (Main Storyboard Fix)
+name: iOS Build (Remove SPM)
 
 on:
   push:
@@ -30,6 +30,8 @@ jobs:
     - name: Setup Capacitor & Pods
       run: |
         npm install @capacitor/cli @capacitor/core @capacitor/ios
+        # Force remove any SPM leftovers
+        rm -rf ios/App/CapApp-SPM
         npx cap sync ios
         
     - name: Setup Xcode
@@ -68,16 +70,14 @@ jobs:
         cd ios/App
         rm -rf build/DerivedData
         
-        if [ -d "App.xcworkspace" ]; then
-          echo "Workspace found, building with workspace..."
-          BUILD_CMD="-workspace App.xcworkspace"
-        else
-          echo "Workspace NOT found, building with project..."
-          BUILD_CMD="-project App.xcodeproj"
+        # Ensure we are using workspace (CocoaPods)
+        if [ ! -d "App.xcworkspace" ]; then
+          echo "Error: Workspace not found! CocoaPods install failed."
+          exit 1
         fi
         
-        # SWIFT_ENABLE_EXPLICIT_MODULES=NO helps with Xcode 16 / CocoaPods compatibility issues
-        xcodebuild $BUILD_CMD \
+        # Disable SPM explicitly in build args
+        xcodebuild -workspace App.xcworkspace \
           -scheme App \
           -configuration Debug \
           -destination 'generic/platform=iOS Simulator' \
