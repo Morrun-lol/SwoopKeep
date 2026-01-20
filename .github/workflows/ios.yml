@@ -1,5 +1,5 @@
 
-name: iOS Build (Nuclear Signing Fix)
+name: iOS Build (Static Linkage Fix)
 
 on:
   push:
@@ -66,6 +66,9 @@ jobs:
     - name: Build for Simulator (Debug)
       run: |
         cd ios/App
+        # Clean derived data first to avoid stale PCMs
+        rm -rf build/DerivedData
+        
         # Using Debug configuration as it is more lenient with signing
         if [ -d "App.xcworkspace" ]; then
           echo "Workspace found, building with workspace..."
@@ -75,6 +78,7 @@ jobs:
           BUILD_CMD="-project App.xcodeproj"
         fi
         
+        # SWIFT_ENABLE_EXPLICIT_MODULES=NO helps with Xcode 16 / CocoaPods compatibility issues
         xcodebuild $BUILD_CMD \
           -scheme App \
           -configuration Debug \
@@ -84,7 +88,8 @@ jobs:
           CODE_SIGN_IDENTITY="" \
           CODE_SIGNING_REQUIRED=NO \
           CODE_SIGNING_ALLOWED=NO \
-          COMPILER_INDEX_STORE_ENABLE=NO
+          COMPILER_INDEX_STORE_ENABLE=NO \
+          SWIFT_ENABLE_EXPLICIT_MODULES=NO
         
     - name: Package Simulator App
       run: |
