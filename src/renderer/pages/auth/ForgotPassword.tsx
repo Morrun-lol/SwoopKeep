@@ -2,8 +2,8 @@ import { useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
-import { Link } from 'react-router-dom'
-import { supabase } from '../../lib/supabase'
+import { Link, useNavigate } from 'react-router-dom'
+import { getSupabase } from '../../lib/supabase'
 import { Loader2, ArrowLeft } from 'lucide-react'
 
 const forgotSchema = z.object({
@@ -16,6 +16,7 @@ export default function ForgotPassword() {
   const [loading, setLoading] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const navigate = useNavigate()
   
   const { register, handleSubmit, formState: { errors } } = useForm<ForgotForm>({
     resolver: zodResolver(forgotSchema)
@@ -26,6 +27,11 @@ export default function ForgotPassword() {
     setError('')
     setMessage('')
     try {
+      const supabase = getSupabase()
+      if (!supabase) {
+        navigate('/config')
+        return
+      }
       const { error } = await supabase.auth.resetPasswordForEmail(data.email, {
         redirectTo: window.location.origin + '/reset-password', // Assuming we have this route later or just login
       })

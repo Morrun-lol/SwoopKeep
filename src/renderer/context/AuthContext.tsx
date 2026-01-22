@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { Session, User } from '@supabase/supabase-js'
-import { supabase } from '../lib/supabase'
+import { getSupabase } from '../lib/supabase'
 
 interface AuthContextType {
   session: Session | null
@@ -20,8 +20,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null)
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
+  const [defaultsInitialized, setDefaultsInitialized] = useState(false)
 
   useEffect(() => {
+    const supabase = getSupabase()
+    if (!supabase) {
+      setSession(null)
+      setUser(null)
+      setLoading(false)
+      return
+    }
+
     // Check active sessions and sets the user
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session)
@@ -39,7 +48,30 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     return () => subscription.unsubscribe()
   }, [])
 
+  useEffect(() => {
+    if (loading) return
+    if (!session) {
+      setDefaultsInitialized(false)
+      return
+    }
+
+    if (defaultsInitialized) return
+    const ensure = async () => {
+      try {
+        if (window.api?.ensureDefaults) {
+          await window.api.ensureDefaults()
+        }
+      } finally {
+        setDefaultsInitialized(true)
+      }
+    }
+
+    ensure()
+  }, [loading, session, defaultsInitialized])
+
   const signOut = async () => {
+    const supabase = getSupabase()
+    if (!supabase) return
     await supabase.auth.signOut()
   }
 

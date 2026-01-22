@@ -1,10 +1,20 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient, type SupabaseClient } from '@supabase/supabase-js'
+import { loadRuntimeConfig } from './runtimeConfig'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+let cached: SupabaseClient | null = null
+let cachedKey = ''
 
-if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase environment variables')
+export const getSupabase = (): SupabaseClient | null => {
+  const cfg = loadRuntimeConfig()
+  const url = (cfg.supabaseUrl || '').trim()
+  const key = (cfg.supabaseAnonKey || '').trim()
+  if (!url || !key) return null
+
+  const nextKey = `${url}|${key}`
+  if (cached && cachedKey === nextKey) return cached
+  cachedKey = nextKey
+  cached = createClient(url, key)
+  return cached
 }
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+export const supabase = getSupabase()

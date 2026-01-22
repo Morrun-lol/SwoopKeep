@@ -3,7 +3,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { Link, useNavigate } from 'react-router-dom'
-import { supabase } from '../../lib/supabase'
+import { getSupabase } from '../../lib/supabase'
 import { Loader2 } from 'lucide-react'
 
 const registerSchema = z.object({
@@ -44,6 +44,11 @@ export default function Register() {
     setLoading(true)
     setError('')
     try {
+      const supabase = getSupabase()
+      if (!supabase) {
+        navigate('/config')
+        return
+      }
       const { error } = await supabase.auth.signUp({
         email: data.email,
         password: data.password

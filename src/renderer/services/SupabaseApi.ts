@@ -2,85 +2,239 @@
 import { ExpenseApi } from './ApiInterface'
 import { supabase } from '../lib/supabase'
 import * as XLSX from 'xlsx'
+import { loadRuntimeConfig } from '../lib/runtimeConfig'
 
 const isInitialized = () => !!supabase
 
+const getApiBaseUrl = () => {
+  const cfg = loadRuntimeConfig()
+  const raw = ((cfg.apiBaseUrl || '') || (import.meta.env.VITE_API_BASE_URL || '')).trim()
+  const loc = typeof window !== 'undefined' ? window.location : null
+  const guessed = loc ? `${loc.protocol}//${loc.hostname}:3001` : ''
+
+  let resolved = raw || guessed
+  try {
+    const u = new URL(resolved)
+    if (loc && (u.hostname === 'localhost' || u.hostname === '127.0.0.1') && loc.hostname && loc.hostname !== u.hostname) {
+      u.hostname = loc.hostname
+      resolved = u.toString()
+    }
+  } catch {
+  }
+
+  return resolved.endsWith('/') ? resolved.slice(0, -1) : resolved
+}
+
+const fetchJsonWithTimeout = async (url: string, init: RequestInit, timeoutMs: number) => {
+  const controller = new AbortController()
+  const t = setTimeout(() => controller.abort(), timeoutMs)
+  try {
+    const res = await fetch(url, { ...init, signal: controller.signal })
+    const json = await res.json().catch(() => null)
+    return { res, json }
+  } finally {
+    clearTimeout(t)
+  }
+}
+
+const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
+  const bytes = new Uint8Array(buffer)
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let i = 0; i < bytes.length; i += chunkSize) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + chunkSize))
+  }
+  return btoa(binary)
+}
+
+const pad2 = (n: number) => String(n).padStart(2, '0')
+
+const parseYmd = (dateStr: string) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return new Date(dateStr)
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+
+const formatYmd = (date: Date) => {
+  const y = date.getFullYear()
+  const m = pad2(date.getMonth() + 1)
+  const d = pad2(date.getDate())
+  return `${y}-${m}-${d}`
+}
+
+const startOfWeekMonday = (date: Date) => {
+  const day = date.getDay()
+  const diff = (day + 6) % 7
+  const d = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  d.setDate(d.getDate() - diff)
+  return d
+}
+
+const startOfMonthDate = (date: Date) => new Date(date.getFullYear(), date.getMonth(), 1)
+
+const startOfQuarterDate = (date: Date) => {
+  const quarterMonth = Math.floor(date.getMonth() / 3) * 3
+  return new Date(date.getFullYear(), quarterMonth, 1)
+}
+
+const startOfYearDate = (date: Date) => new Date(date.getFullYear(), 0, 1)
+
 export class SupabaseApi implements ExpenseApi {
+
+  async ensureDefaults(): Promise<void> {
+    if (!isInitialized()) return
+    try {
+      const { data: families } = await supabase!
+        .from('families')
+        .select('*')
+        .limit(1)
+
+      let familyId = families?.[0]?.id
+      if (!familyId) {
+        const { data: created } = await supabase!
+          .from('families')
+          .insert({ name: '默认家庭组' })
+          .select()
+          .single()
+        familyId = created?.id
+      }
+
+      if (familyId) {
+        const { data: members } = await supabase!
+          .from('members')
+          .select('id')
+          .eq('family_id', familyId)
+          .eq('name', '我')
+          .limit(1)
+
+        if (!members || members.length === 0) {
+          await supabase!.from('members').insert({ name: '我', family_id: familyId })
+        }
+      }
+    } catch {
+      return
+    }
+  }
     
   async transcribeAudio(buffer: ArrayBuffer): Promise<string> {
+    const baseUrl = getApiBaseUrl()
+    if (!baseUrl) throw new Error('未配置语音识别服务地址：请设置 VITE_API_BASE_URL')
+
     try {
-        // Try Capacitor Plugin first
-        const { SpeechRecognition } = await import('@capacitor-community/speech-recognition')
-        // @ts-ignore
-        const permissionStatus = await SpeechRecognition.checkPermissions()
-        // @ts-ignore
-        if (permissionStatus.speechRecognition !== 'granted') {
-             // @ts-ignore
-            await SpeechRecognition.requestPermissions()
-        }
-        // TODO: Implement actual listening logic
-        // For file buffer, we might need a different approach (e.g., OpenAI Whisper API)
-        // Since Capacitor SpeechRecognition is for live microphone.
-        throw new Error('Use WebSocket or API') 
-    } catch (e) {
-        return this.transcribeAudioViaWebSocket(buffer)
+      const { res, json } = await fetchJsonWithTimeout(
+        `${baseUrl}/api/ai/transcribe`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            audioBase64: arrayBufferToBase64(buffer),
+            mimeType: 'audio/wav',
+            fileName: 'audio.wav',
+            language: 'zh',
+          }),
+        },
+        30000,
+      )
+
+      if (!res.ok) {
+        const message = json?.error || '语音识别失败'
+        throw new Error(message)
+      }
+
+      if (!json?.success || typeof json.text !== 'string') {
+        throw new Error(json?.error || '语音识别失败')
+      }
+
+      return json.text
+    } catch (e: any) {
+      if (e?.name === 'AbortError') throw new Error('语音识别超时，请检查网络后重试')
+      if (String(e?.message || '').includes('Failed to fetch')) {
+        throw new Error(`无法连接语音识别服务（${baseUrl}）。请确认服务已启动且手机/浏览器可访问。`)
+      }
+      throw e
     }
   }
 
   async transcribeAudioViaWebSocket(buffer: ArrayBuffer): Promise<string> {
-       console.warn('Voice recognition via WebSocket not fully ported yet.')
-       return "语音记账测试"
+       return this.transcribeAudio(buffer)
   }
 
-  async parseExpense(text: string): Promise<any> {
-    // Call OpenAI if configured
-    const apiKey = import.meta.env.VITE_OPENAI_API_KEY
-    const baseURL = import.meta.env.VITE_OPENAI_BASE_URL || 'https://api.openai.com/v1'
-    
-    if (apiKey) {
-        try {
-            const response = await fetch(`${baseURL}/chat/completions`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${apiKey}`
-                },
-                body: JSON.stringify({
-                    model: 'gpt-3.5-turbo',
-                    messages: [
-                        {
-                            role: 'system',
-                            content: `You are an expense parser. Extract expense details from the user input.
-                            Return a JSON object with these fields:
-                            - category (string, required): Choose from [餐饮, 交通, 购物, 娱乐, 医疗, 教育, 住房, 其他]
-                            - amount (number, required): The expense amount
-                            - description (string): Brief description
-                            - expense_date (string): YYYY-MM-DD format (default to today if not specified)
-                            
-                            Output JSON only.`
-                        },
-                        { role: 'user', content: text }
-                    ]
-                })
-            })
-            
-            const data = await response.json()
-            const content = data.choices[0].message.content
-            // Extract JSON from potential markdown code blocks
-            const jsonMatch = content.match(/\{[\s\S]*\}/)
-            if (jsonMatch) {
-                return JSON.parse(jsonMatch[0])
-            }
-            return JSON.parse(content)
-        } catch (e) {
-            console.error('OpenAI parse failed', e)
-        }
+  async parseExpense(text: string, context?: any): Promise<any> {
+    const baseUrl = getApiBaseUrl()
+    if (!baseUrl) throw new Error('未配置语义解析服务地址：请设置 VITE_API_BASE_URL')
+
+    const hierarchy = Array.isArray(context?.hierarchy)
+      ? context.hierarchy
+          .map((i: any) => `${(i?.project || '无项目').toString()}>${(i?.category || '').toString()}>${(i?.sub_category || '无子分类').toString()}`)
+          .slice(0, 120)
+      : []
+
+    const memberNames = Array.isArray(context?.members)
+      ? context.members.map((m: any) => (m?.name || '').toString()).filter(Boolean).slice(0, 50)
+      : []
+
+    try {
+      const { res, json } = await fetchJsonWithTimeout(
+        `${baseUrl}/api/ai/parse-expense`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, context: { hierarchy, members: memberNames } }),
+        },
+        20000,
+      )
+
+      if (!res.ok) {
+        const message = json?.error || '语义解析失败'
+        throw new Error(message)
+      }
+
+      const hasExpenses = Array.isArray(json?.expenses)
+      const hasData = !!json?.data
+      if (!json?.success || (!hasExpenses && !hasData)) {
+        const message = json?.error || '语义解析失败'
+        throw new Error(message)
+      }
+
+      const list = Array.isArray(json?.expenses)
+        ? json.expenses
+        : (json?.data ? [json.data] : [])
+
+      const normalized = list.map((data: any) => ({
+        project: data?.project || '日常开支',
+        category: data?.category || '其他',
+        sub_category: data?.sub_category || '其他',
+        amount: data?.amount,
+        expense_date: data?.expense_date,
+        description: data?.description,
+        member_name: data?.member_name,
+        member_id: data?.member_id,
+        missing_info: data?.missing_info || [],
+      }))
+
+      return {
+        expenses: normalized,
+        provider: json.provider || 'unknown',
+      }
+    } catch (e: any) {
+      if (e?.name === 'AbortError') throw new Error('语义解析超时，请检查网络后重试')
+      if (String(e?.message || '').includes('Failed to fetch')) {
+        throw new Error(`无法连接语义解析服务（${baseUrl}）。请确认服务已启动且手机/浏览器可访问。`)
+      }
+      throw e
     }
-    return { category: '其他', amount: 0, description: text, expense_date: new Date().toISOString().split('T')[0] }
   }
 
   async checkLLMConnection(): Promise<boolean> {
-    return !!import.meta.env.VITE_OPENAI_API_KEY
+    const baseUrl = getApiBaseUrl()
+    try {
+      const response = await fetch(`${baseUrl}/api/ai/health`)
+      if (!response.ok) return false
+      const payload = await response.json()
+      return !!payload?.openaiConfigured
+    } catch {
+      return false
+    }
   }
 
   async testiFlytekConnection(): Promise<{ success: boolean; message: string; logs: string[] }> {
@@ -100,6 +254,44 @@ export class SupabaseApi implements ExpenseApi {
         return 0
     }
     return res.id
+  }
+
+  async getMonthlyBudgets(year: number, month: number): Promise<any[]> {
+    if (!isInitialized()) return []
+    const { data } = await supabase!
+      .from('monthly_budgets')
+      .select('*')
+      .eq('year', year)
+      .eq('month', month)
+      .order('project', { ascending: true })
+      .order('category', { ascending: true })
+      .order('sub_category', { ascending: true })
+
+    return data || []
+  }
+
+  async saveMonthlyBudget(budget: any): Promise<boolean> {
+    if (!isInitialized()) return false
+    const payload = {
+      project: (budget?.project ?? '').toString(),
+      category: (budget?.category ?? '').toString(),
+      sub_category: (budget?.sub_category ?? '').toString(),
+      budget_amount: Number(budget?.budget_amount ?? 0),
+      year: Number(budget?.year),
+      month: Number(budget?.month),
+    }
+
+    const { error } = await supabase!
+      .from('monthly_budgets')
+      .upsert(payload, { onConflict: 'user_id, project, category, sub_category, year, month' })
+
+    return !error
+  }
+
+  async deleteMonthlyBudget(id: number): Promise<boolean> {
+    if (!isInitialized()) return false
+    const { error } = await supabase!.from('monthly_budgets').delete().eq('id', id)
+    return !error
   }
 
   async getExpensesByDateRange(startDate: string, endDate: string): Promise<any[]> {
@@ -282,7 +474,7 @@ export class SupabaseApi implements ExpenseApi {
       }
   }
 
-  async importExcel(buffer: ArrayBuffer): Promise<{ success: number; failed: number }> {
+  async importExcel(buffer: ArrayBuffer, fileName?: string): Promise<{ success: number; failed: number, skipped?: number, importId?: number, errors?: { rowNumber: number, message: string }[] }> {
       if (!isInitialized()) return { success: 0, failed: 0 }
       
       try {
@@ -294,14 +486,22 @@ export class SupabaseApi implements ExpenseApi {
 
         const header = data[0]
         const requiredHeader = ['费用归属', '项目', '分类', '子分类', '日期', '金额', '备注']
-        // Basic header validation
-        if (header[0] !== '费用归属' && header[1] !== '分类') {
-             console.error('Invalid header format')
-             return { success: 0, failed: data.length - 1 }
+        const oldHeader = ['项目', '分类', '子分类', '日期', '金额', '备注']
+        const headerStr = (header || []).slice(0, 7).map((v: any) => String(v ?? '').trim())
+        const isNew = JSON.stringify(headerStr.slice(0, 7)) === JSON.stringify(requiredHeader)
+        const isOld = JSON.stringify(headerStr.slice(0, 6)) === JSON.stringify(oldHeader)
+        if (!isNew && !isOld) {
+          return {
+            success: 0,
+            failed: data.length - 1,
+            errors: [{ rowNumber: 1, message: `表头格式错误。请下载最新模板，确保表头包含：${requiredHeader.join(', ')}` }],
+          }
         }
 
         let successCount = 0
         let failedCount = 0
+        let skippedCount = 0
+        const errors: { rowNumber: number, message: string }[] = []
         
         // 1. Get Families and Members Cache
         const families = await this.getAllFamilies()
@@ -318,7 +518,7 @@ export class SupabaseApi implements ExpenseApi {
         const { data: importHistory } = await supabase!
             .from('import_history')
             .insert({
-                file_name: `Import_${new Date().toISOString()}`,
+                file_name: fileName || `Import_${new Date().toISOString()}`,
                 import_type: 'expense',
                 record_count: 0 
             })
@@ -335,7 +535,7 @@ export class SupabaseApi implements ExpenseApi {
             try {
                 let memberName, project, category, subCategory, rawDate, amount, note
                 
-                if (header[0] === '费用归属') {
+                if (isNew) {
                     [memberName, project, category, subCategory, rawDate, amount, note] = row
                 } else {
                     [project, category, subCategory, rawDate, amount, note] = row
@@ -356,6 +556,7 @@ export class SupabaseApi implements ExpenseApi {
 
                 if (!amount || isNaN(Number(amount))) {
                     failedCount++
+                    errors.push({ rowNumber: i + 1, message: '金额无效' })
                     continue
                 }
 
@@ -365,7 +566,13 @@ export class SupabaseApi implements ExpenseApi {
                     const date = new Date((rawDate - 25569) * 86400 * 1000)
                     dateStr = date.toISOString().split('T')[0]
                 } else {
-                    dateStr = String(rawDate)
+                    dateStr = String(rawDate || '').trim()
+                }
+
+                if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
+                    failedCount++
+                    errors.push({ rowNumber: i + 1, message: '日期无效，请使用 YYYY-MM-DD 或 Excel 日期格式' })
+                    continue
                 }
 
                 const finalCategory = category || '其他'
@@ -381,7 +588,8 @@ export class SupabaseApi implements ExpenseApi {
                     .maybeSingle()
                 
                 if (existing) {
-                    continue // Skip duplicate
+                    skippedCount++
+                    continue
                 }
 
                 await this.createExpense({
@@ -398,6 +606,7 @@ export class SupabaseApi implements ExpenseApi {
             } catch (e) {
                 console.error(`Row ${i} failed`, e)
                 failedCount++
+                errors.push({ rowNumber: i + 1, message: (e as any)?.message || '导入失败' })
             }
         }
 
@@ -409,11 +618,11 @@ export class SupabaseApi implements ExpenseApi {
                 .eq('id', importId)
         }
 
-        return { success: successCount, failed: failedCount }
+        return { success: successCount, failed: failedCount, skipped: skippedCount, importId, errors }
 
       } catch (e) {
           console.error('Import failed', e)
-          return { success: 0, failed: 0 }
+          return { success: 0, failed: 0, errors: [{ rowNumber: 0, message: (e as any)?.message || '导入失败' }] }
       }
   }
 
@@ -422,32 +631,60 @@ export class SupabaseApi implements ExpenseApi {
      // Client-side aggregation
      const map = new Map<string, number>()
      expenses.forEach(e => {
-         let key = e.category
-         if (level === 'sub_category' && e.category === parentValue) {
-             key = e.sub_category || '其他'
-         } else if (level === 'project') {
-             key = e.project || '无项目'
+         const mode = level || 'category'
+         if (mode === 'sub_category') {
+           if (parentValue && e.category !== parentValue) return
+           const key = (e.sub_category || '').trim() || '其他'
+           const current = map.get(key) || 0
+           map.set(key, current + (e.amount || 0))
+           return
          }
-         
-         if (level === 'sub_category' && e.category !== parentValue) return
 
+         if (mode === 'project') {
+           const key = (e.project || '').trim() || '无项目'
+           const current = map.get(key) || 0
+           map.set(key, current + (e.amount || 0))
+           return
+         }
+
+         const key = (e.category || '').trim() || '其他'
          const current = map.get(key) || 0
-         map.set(key, current + e.amount)
+         map.set(key, current + (e.amount || 0))
      })
-     return Array.from(map.entries()).map(([name, value]) => ({ name, value }))
+     return Array.from(map.entries())
+       .map(([name, value]) => ({ name, value }))
+       .sort((a, b) => b.value - a.value)
   }
 
   async getExpenseTrend(startDate: string, endDate: string, dimension?: string, filter?: any): Promise<any[]> {
      const expenses = await this.getExpensesByDateRange(startDate, endDate)
-     // Client-side aggregation for trend
-     const map = new Map<string, number>()
-     expenses.forEach(e => {
-         // Filter logic can be added here
-         const date = e.expense_date
-         const current = map.get(date) || 0
-         map.set(date, current + e.amount)
+     const bucket = (dateStr: string) => {
+       const date = parseYmd(dateStr)
+       if (dimension === 'week') return formatYmd(startOfWeekMonday(date))
+       if (dimension === 'month') return formatYmd(startOfMonthDate(date))
+       if (dimension === 'quarter') return formatYmd(startOfQuarterDate(date))
+       if (dimension === 'year') return formatYmd(startOfYearDate(date))
+       return dateStr
+     }
+
+     const filtered = expenses.filter((e) => {
+       if (!filter) return true
+       if (filter.type === 'category') return e.category === filter.value
+       if (filter.type === 'sub_category') return e.sub_category === filter.value
+       if (filter.type === 'project') return (e.project || '') === filter.value
+       return true
      })
-     return Array.from(map.entries()).map(([date, amount]) => ({ date, amount })).sort((a,b) => a.date.localeCompare(b.date))
+
+     const map = new Map<string, number>()
+     filtered.forEach((e) => {
+       const key = bucket(e.expense_date)
+       const current = map.get(key) || 0
+       map.set(key, current + (e.amount || 0))
+     })
+
+     return Array.from(map.entries())
+       .map(([date, amount]) => ({ date, amount }))
+       .sort((a, b) => a.date.localeCompare(b.date))
   }
 
   async getYearGoals(year: number, memberId?: number): Promise<any[]> {
@@ -457,17 +694,29 @@ export class SupabaseApi implements ExpenseApi {
         .select('*')
         .eq('year', year)
       
-      if (memberId) query = query.eq('member_id', memberId)
+      if (memberId !== undefined) query = query.eq('member_id', memberId)
       const { data } = await query
       return data || []
   }
 
   async saveYearGoal(goal: any): Promise<any[]> {
       if (!isInitialized()) return []
+      const payload = {
+        year: Number(goal?.year),
+        project: (goal?.project ?? '').toString(),
+        category: (goal?.category ?? '').toString(),
+        sub_category: (goal?.sub_category ?? '').toString(),
+        goal_amount: Number(goal?.goal_amount ?? 0),
+        expense_type: (goal?.expense_type ?? '常规费用').toString(),
+        member_id: Number(goal?.member_id ?? 0),
+      }
       const { error } = await supabase!
         .from('year_goals')
-        .upsert(goal, { onConflict: 'year, project, category, sub_category, member_id' })
-      return []
+        .upsert(payload, { onConflict: 'user_id, year, project, category, sub_category, member_id' })
+      if (error) throw error
+
+      const memberId = goal?.member_id !== undefined ? Number(goal.member_id) : undefined
+      return this.getYearGoals(payload.year, memberId)
   }
 
   async getGoalComparison(year: number, startDate?: string, endDate?: string, memberId?: number): Promise<any[]> {
@@ -508,48 +757,30 @@ export class SupabaseApi implements ExpenseApi {
   }
 
   async recognizeImage(buffer: ArrayBuffer): Promise<{ text: string; provider: string }> {
-      const apiKey = import.meta.env.VITE_OPENAI_API_KEY
-      const baseURL = import.meta.env.VITE_OPENAI_BASE_URL || 'https://api.openai.com/v1'
+      const baseUrl = getApiBaseUrl()
+      try {
+        const response = await fetch(`${baseUrl}/api/ai/recognize-image`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            imageBase64: arrayBufferToBase64(buffer),
+            mimeType: 'image/jpeg',
+          }),
+        })
 
-      if (apiKey) {
-          try {
-              const base64 = btoa(
-                  new Uint8Array(buffer)
-                    .reduce((data, byte) => data + String.fromCharCode(byte), '')
-              );
+        if (!response.ok) {
+          throw new Error('Image recognition failed')
+        }
 
-              const response = await fetch(`${baseURL}/chat/completions`, {
-                  method: 'POST',
-                  headers: {
-                      'Content-Type': 'application/json',
-                      'Authorization': `Bearer ${apiKey}`
-                  },
-                  body: JSON.stringify({
-                      model: 'gpt-4o', 
-                      messages: [
-                          {
-                              role: 'system',
-                              content: 'Identify the text content from the receipt/image. Return only the text found.'
-                          },
-                          {
-                              role: 'user',
-                              content: [
-                                  { type: 'text', text: 'Transcribe this receipt.' },
-                                  { type: 'image_url', image_url: { url: `data:image/jpeg;base64,${base64}` } }
-                              ]
-                          }
-                      ]
-                  })
-              })
+        const payload = await response.json()
+        if (!payload?.success || typeof payload.text !== 'string') {
+          throw new Error('Image recognition failed')
+        }
 
-              const data = await response.json()
-              const text = data.choices?.[0]?.message?.content || ''
-              return { text, provider: 'openai' }
-          } catch (e) {
-              console.error('Image recognition failed', e)
-          }
+        return { text: payload.text, provider: 'openai' }
+      } catch {
+        return { text: 'Image recognition unavailable', provider: 'none' }
       }
-      return { text: "Image recognition requires OpenAI Key", provider: "none" }
   }
 
   async importBudgetGoals(buffer: ArrayBuffer, year: number, memberId?: number): Promise<{ success: number; failed: number }> {
@@ -655,7 +886,7 @@ export class SupabaseApi implements ExpenseApi {
   async deleteYearGoal(id: number, year: number, memberId?: number): Promise<any[]> {
       if (!isInitialized()) return []
       await supabase!.from('year_goals').delete().eq('id', id)
-      return []
+      return this.getYearGoals(year, memberId)
   }
 
   async addExpenseHierarchyItem(project: string, category: string, subCategory: string): Promise<boolean> {

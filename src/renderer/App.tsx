@@ -10,8 +10,10 @@ import UserLedger from './pages/UserLedger'
 import Login from './pages/auth/Login'
 import Register from './pages/auth/Register'
 import ForgotPassword from './pages/auth/ForgotPassword'
+import Config from './pages/Config'
 import ErrorBoundary from './components/ErrorBoundary'
 import { AuthProvider, useAuth } from './context/AuthContext'
+import { isSupabaseConfigured } from './lib/runtimeConfig'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
   const { session, loading } = useAuth()
@@ -30,11 +32,19 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function App() {
+  const needsConfig = !window.electron && !isSupabaseConfigured()
+
   return (
     <ErrorBoundary>
       <AuthProvider>
         <Router>
             <Routes>
+              <Route path="/config" element={<Config />} />
+
+              {needsConfig ? (
+                <Route path="*" element={<Navigate to="/config" replace />} />
+              ) : null}
+
               {/* Public Routes */}
               <Route path="/login" element={<Login />} />
               <Route path="/register" element={<Register />} />
