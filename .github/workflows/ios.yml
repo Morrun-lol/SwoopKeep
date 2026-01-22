@@ -18,8 +18,14 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '20'
+        node-version: '22.13.0'
+        check-latest: true
         cache: 'npm'
+
+    - name: Verify Node Version
+      run: |
+        node -v
+        npm -v
         
     - name: Install Dependencies
       run: npm ci
@@ -28,7 +34,9 @@ jobs:
       run: npm run build:web
       
     - name: Sync Capacitor iOS
-      run: npx cap sync ios
+      run: |
+        npx cap --version
+        npx cap sync ios
 
     - name: Cache CocoaPods
       uses: actions/cache@v4
