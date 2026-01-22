@@ -10,11 +10,9 @@ interface RecognitionResult {
   isFinal: boolean
 }
 
-// Configuration from environment variables
-// 注意：为了安全起见，通常推荐使用环境变量。但应您的要求，在此填入真实 Key 以确保运行。
-const IFLYTEK_APP_ID = process.env.IFLYTEK_APP_ID || 'c9243c11'
-const IFLYTEK_API_SECRET = process.env.IFLYTEK_API_SECRET || 'MTM2OWU4YjFlOTM0NDU3YjRmZDZiNDIw'
-const IFLYTEK_API_KEY = process.env.IFLYTEK_API_KEY || '4433bf4eb8921a8745f3ede0f9acbbd0'
+const IFLYTEK_APP_ID = process.env.IFLYTEK_APP_ID || ''
+const IFLYTEK_API_SECRET = process.env.IFLYTEK_API_SECRET || ''
+const IFLYTEK_API_KEY = process.env.IFLYTEK_API_KEY || ''
 const IFLYTEK_HOST = 'iat-api.xfyun.cn'
 const IFLYTEK_PATH = '/v2/iat'
 

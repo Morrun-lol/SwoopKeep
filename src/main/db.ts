@@ -66,7 +66,16 @@ export function initDb() {
         file_name VARCHAR(255) NOT NULL,
         import_type VARCHAR(50) NOT NULL, -- 'expense' | 'budget'
         record_count INTEGER NOT NULL,
-        import_date DATETIME DEFAULT CURRENT_TIMESTAMP
+        import_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+        status VARCHAR(20) DEFAULT 'success',
+        total_rows INTEGER DEFAULT 0,
+        processed_rows INTEGER DEFAULT 0,
+        failed_count INTEGER DEFAULT 0,
+        skipped_count INTEGER DEFAULT 0,
+        file_size_bytes INTEGER DEFAULT 0,
+        error_message TEXT,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        finished_at DATETIME
     );
 
     CREATE TABLE IF NOT EXISTS expense_hierarchy (
@@ -257,7 +266,41 @@ export function initDb() {
     if (hasProject) {
         db.prepare('CREATE INDEX IF NOT EXISTS idx_project ON expense_records(project)').run()
     }
+
+        const importInfo = db.prepare('PRAGMA table_info(import_history)').all() as any[]
+        const importCols = new Set(importInfo.map((c: any) => c.name))
+        const addCol = (name: string, def: string) => {
+          if (!importCols.has(name)) db.prepare(`ALTER TABLE import_history ADD COLUMN ${name} ${def}`).run()
+        }
+
+        addCol('status', "VARCHAR(20) DEFAULT 'success'")
+        addCol('total_rows', 'INTEGER DEFAULT 0')
+        addCol('processed_rows', 'INTEGER DEFAULT 0')
+        addCol('failed_count', 'INTEGER DEFAULT 0')
+        addCol('skipped_count', 'INTEGER DEFAULT 0')
+        addCol('file_size_bytes', 'INTEGER DEFAULT 0')
+        addCol('error_message', 'TEXT')
+        addCol('updated_at', 'DATETIME')
+        addCol('finished_at', 'DATETIME')
+
+        db.prepare(`
+          UPDATE import_history
+          SET updated_at = COALESCE(updated_at, import_date, CURRENT_TIMESTAMP)
+        `).run()
+
+        db.prepare('CREATE INDEX IF NOT EXISTS idx_import_history_date ON import_history(import_date)').run()
+        db.prepare('CREATE INDEX IF NOT EXISTS idx_import_history_status ON import_history(status)').run()
+
+        db.prepare(`
+          UPDATE import_history
+          SET status = 'failed',
+              error_message = COALESCE(error_message, '导入中断'),
+              finished_at = COALESCE(finished_at, CURRENT_TIMESTAMP),
+              updated_at = CURRENT_TIMESTAMP
+          WHERE status = 'processing'
+        `).run()
   } catch (error) {
+    console.error('Migration failed:', error)
     console.error('Migration failed:', error)
   }
 

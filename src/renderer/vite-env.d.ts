@@ -10,7 +10,7 @@ interface Window {
   }
   api: {
     transcribeAudio(buffer: ArrayBuffer): Promise<string>
-    parseExpense(text: string): Promise<any>
+    parseExpense(text: string, context?: any): Promise<any>
     checkLLMConnection(): Promise<boolean>
     testiFlytekConnection(): Promise<{ success: boolean; message: string; logs: string[] }>
     createExpense(data: any): Promise<number>
@@ -36,7 +36,11 @@ interface Window {
     }>
     downloadTemplate(): Promise<boolean>
     downloadBudgetTemplate(): Promise<boolean>
-    importExcel(buffer: ArrayBuffer): Promise<{ success: number, failed: number }>
+    importExcel(buffer: ArrayBuffer, fileName?: string): Promise<{ importId?: number, status?: string, total?: number, success: number, failed: number, skipped?: number, errors?: { rowNumber: number, message: string }[] }>
+    getImportJobStatus(importId: number): Promise<any>
+    cancelImportJob(importId: number): Promise<boolean>
+    onImportExcelProgress(func: (payload: any) => void): () => void
+    onImportExcelDone(func: (payload: any) => void): () => void
     getExpenseComposition(startDate: string, endDate: string, level?: string, parentValue?: string): Promise<any[]>
     getExpenseTrend(startDate: string, endDate: string, dimension?: string, filter?: any): Promise<any[]>
     getYearGoals(year: number, memberId?: number): Promise<{
@@ -75,5 +79,13 @@ interface Window {
     getMembersByFamily(familyId: number): Promise<any[]>
     getAllMembers(): Promise<any[]>
     deleteMember(id: number): Promise<boolean>
+
+    // Monthly Budgets
+    getMonthlyBudgets(year: number, month: number): Promise<any[]>
+    saveMonthlyBudget(budget: any): Promise<boolean>
+    deleteMonthlyBudget(id: number): Promise<boolean>
+
+    // Defaults
+    ensureDefaults(): Promise<void>
   }
 }

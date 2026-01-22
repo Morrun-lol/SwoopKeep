@@ -29,12 +29,17 @@ import {
   getImportHistory,
   deleteImportRecord,
   updateImportHistoryCount,
+  updateImportHistoryProgress,
+  rollbackImportExpenses,
   addExpenseHierarchyItem,
   getExpenseStructure,
   getAllExpenseTypes,
   addExpenseType,
   updateExpenseType,
-  toggleExpenseType
+  toggleExpenseType,
+  getMonthlyBudgets,
+  saveMonthlyBudget,
+  deleteMonthlyBudget
 } from './services/expense'
 import { getEnvConfig, saveEnvConfig } from './services/env-manager'
 import {
@@ -44,13 +49,33 @@ import {
   createMember,
   getMembersByFamily,
   deleteMember,
-  getAllMembers
+  getAllMembers,
+  ensureDefaults
 } from './services/family'
 import { recognizeReceipt } from './services/ocr'
 import fs from 'fs'
-import { generateBudgetTemplate, parseBudgetExcel } from './services/excel'
+import xlsx from 'node-xlsx'
+import { generateBudgetTemplate, parseBudgetExcel, parseExpenseExcel } from './services/excel'
 
 require('dotenv').config()
+
+type ImportJobStatus = 'processing' | 'success' | 'failed' | 'canceled'
+
+type ImportJob = {
+  importId: number
+  status: ImportJobStatus
+  total: number
+  processed: number
+  success: number
+  failed: number
+  skipped: number
+  startedAt: number
+  fileName?: string
+  errorMessage?: string
+  canceled?: boolean
+}
+
+const importJobs = new Map<number, ImportJob>()
 
 function createWindow(): void {
   // Create the browser window.
@@ -144,7 +169,7 @@ ipcMain.handle('transcribe-audio', async (_, buffer) => {
   return result.text
 })
 
-ipcMain.handle('parse-expense', async (_, text) => {
+ipcMain.handle('parse-expense', async (_, text, _context) => {
   return parseExpense(text)
 })
 
@@ -221,6 +246,18 @@ ipcMain.handle('get-expense-trend', async (_, startDate, endDate, dimension, fil
   return getExpenseTrend(startDate, endDate, dimension, filter)
 })
 
+ipcMain.handle('get-monthly-budgets', async (_, year, month) => {
+  return getMonthlyBudgets(year, month)
+})
+
+ipcMain.handle('save-monthly-budget', async (_, budget) => {
+  return saveMonthlyBudget(budget)
+})
+
+ipcMain.handle('delete-monthly-budget', async (_, id) => {
+  return deleteMonthlyBudget(id)
+})
+
 ipcMain.handle('get-year-goals', async (_, year, memberId) => {
   return getYearGoals(year, memberId)
 })
@@ -289,35 +326,31 @@ ipcMain.handle('download-template', async () => {
     ['爸爸', '餐饮', '一日三餐', '午餐', '2025-01-14', 35.5, '牛肉面'], // 示例数据
     ['妈妈', '交通', '公共交通', '地铁', '2025-01-14', 5.0, '上班通勤']
   ]
-  // @ts-ignore
   const buffer = xlsx.build([{ name: '模板', data: data, options: {} }])
   fs.writeFileSync(result.filePath, buffer)
   return true
 })
 
 // 导入 Excel
-ipcMain.handle('import-excel', async (_, buffer) => {
+ipcMain.handle('import-excel', async (event, payload, maybeFileName) => {
   try {
-    // @ts-ignore
-    const sheets = xlsx.parse(Buffer.from(buffer))
-    const sheet = sheets[0] // 读取第一个 sheet
-    const data = sheet.data as any[][]
+    const buffer = payload && payload.buffer ? payload.buffer : payload
+    const fileName = (payload && payload.fileName ? payload.fileName : maybeFileName) as string | undefined
 
-    if (data.length < 2) throw new Error('Excel 文件为空或格式错误')
-
-    // 校验表头
-    const header = data[0]
-    const requiredHeader = ['费用归属', '项目', '分类', '子分类', '日期', '金额', '备注']
-    if (JSON.stringify(header.slice(0, 7)) !== JSON.stringify(requiredHeader)) {
-      // 兼容旧模板（无费用归属）
-      const oldHeader = ['项目', '分类', '子分类', '日期', '金额', '备注']
-      if (JSON.stringify(header.slice(0, 6)) !== JSON.stringify(oldHeader)) {
-         throw new Error(`表头格式错误。请下载最新模板，确保表头包含：${requiredHeader.join(', ')}`)
-      }
+    const toNodeBuffer = (input: any) => {
+      if (!input) return null
+      if (Buffer.isBuffer(input)) return input
+      if (input instanceof ArrayBuffer) return Buffer.from(new Uint8Array(input))
+      if (ArrayBuffer.isView(input)) return Buffer.from(input as Uint8Array)
+      return null
     }
 
-    let successCount = 0
-    let failedCount = 0
+    const nodeBuf = toNodeBuffer(buffer)
+    if (!nodeBuf) throw new Error('导入数据格式错误：未收到有效的文件内容')
+    if (nodeBuf.length === 0) throw new Error('Excel 文件为空或格式错误')
+    if (nodeBuf.length > 30 * 1024 * 1024) throw new Error('Excel 文件过大（>30MB），请拆分后再导入')
+
+    const startedAt = Date.now()
     
     // Ensure at least one family exists for auto-created members
     let families = getAllFamilies()
@@ -328,109 +361,256 @@ ipcMain.handle('import-excel', async (_, buffer) => {
         defaultFamilyId = families[0].id!
     }
 
-    // Get all members for matching
     let members = getAllMembers()
-    console.log('[Import] Starting import. Members:', members.length)
-    
-    // We will update frontend to pass filename. For now use timestamp.
-    const importId = addImportHistory('Batch Import (Expenses)', 'expense', 0) // Placeholder count
-    console.log('[Import] History ID:', importId)
 
-    // 从第二行开始遍历数据
-    for (let i = 1; i < data.length; i++) {
-      const row = data[i]
-      if (row.length === 0) continue
+    const importId = addImportHistory(fileName || `Import_${new Date().toISOString()}`, 'expense', 0)
+    const logPath = join(app.getPath('userData'), 'import-expense.log')
+    const log = (level: 'info' | 'warn' | 'error', obj: any) => {
+      const line = JSON.stringify({ ts: new Date().toISOString(), level, importId, ...obj })
+      try {
+        fs.appendFileSync(logPath, `${line}\n`)
+      } catch {
+      }
+      if (level === 'error') console.error(line)
+      else console.log(line)
+    }
+
+    updateImportHistoryProgress(importId, {
+      status: 'processing',
+      total_rows: 0,
+      processed_rows: 0,
+      record_count: 0,
+      failed_count: 0,
+      skipped_count: 0,
+      file_size_bytes: nodeBuf.length,
+      error_message: null,
+      finished_at: null,
+    })
+
+    let job: ImportJob = {
+      importId,
+      status: 'processing',
+      total: 0,
+      processed: 0,
+      success: 0,
+      failed: 0,
+      skipped: 0,
+      startedAt,
+      fileName,
+    }
+    importJobs.set(importId, job)
+
+    const wc = event.sender
+    wc.send('import-excel-progress', { ...job })
+
+    const yieldNow = () => new Promise<void>((resolve) => setImmediate(resolve))
+    const batchSize = 200
+
+    setImmediate(async () => {
+      let successCount = 0
+      let failedCount = 0
+      let skippedCount = 0
+      let parsedErrors: any[] = []
 
       try {
-        let memberName, project, category, subCategory, rawDate, amount, note
-        
-        // 判断是新模板还是旧模板
-        if (row.length >= 7 || header[0] === '费用归属') {
-            [memberName, project, category, subCategory, rawDate, amount, note] = row
-        } else {
-            [project, category, subCategory, rawDate, amount, note] = row
+        const arrayBuffer = nodeBuf.buffer.slice(
+          nodeBuf.byteOffset,
+          nodeBuf.byteOffset + nodeBuf.byteLength
+        ) as ArrayBuffer
+        const parsed = parseExpenseExcel(arrayBuffer)
+        parsedErrors = parsed.errors
+        failedCount = parsed.errors.length
+
+        const total = parsed.rows.length + parsed.errors.length
+        job.total = total
+        job.failed = failedCount
+        importJobs.set(importId, job)
+
+        updateImportHistoryProgress(importId, {
+          status: 'processing',
+          total_rows: total,
+          processed_rows: 0,
+          record_count: 0,
+          failed_count: failedCount,
+          skipped_count: 0,
+          error_message: parsed.errors.length ? `解析失败行数: ${parsed.errors.length}` : null,
+          finished_at: null,
+        })
+        wc.send('import-excel-progress', { ...job })
+        await yieldNow()
+
+        const validRows = parsed.rows
+        if (validRows.length === 0) {
+          job.status = 'failed'
+          job.errorMessage = parsed.errors.length ? '所有数据行均解析失败' : 'Excel 文件为空或无有效数据'
+          updateImportHistoryProgress(importId, {
+            status: 'failed',
+            processed_rows: 0,
+            total_rows: total,
+            record_count: 0,
+            failed_count: failedCount,
+            skipped_count: 0,
+            error_message: job.errorMessage,
+            finished_at: new Date().toISOString(),
+          })
+          wc.send('import-excel-done', { ...job, errors: parsed.errors })
+          return
         }
-        
-        // 查找成员ID，如果不存在则自动创建
-        let memberId = null
-        if (memberName) {
-            const nameStr = String(memberName).trim()
-            if (nameStr) {
-                let member = members.find(m => m.name === nameStr)
-                if (!member) {
-                    // Auto-create member
-                    const newId = createMember(nameStr, defaultFamilyId)
-                    member = { id: newId, name: nameStr, family_id: defaultFamilyId }
-                    members.push(member) // Update local cache
-                    console.log(`[Import] Auto-created member: ${nameStr}`)
-                }
-                memberId = member.id
+
+        const dates = validRows.map((r) => r.expense_date).sort()
+        const minDate = dates[0]
+        const maxDate = dates[dates.length - 1]
+
+        const existing = getExpensesByDateRange(minDate, maxDate)
+        const keyOf = (r: any) => {
+          const amount = Number(r.amount)
+          const category = (r.category || '').toString()
+          const description = (r.description || '').toString()
+          const project = (r.project || '').toString()
+          const sub = (r.sub_category || '').toString()
+          const memberId = r.member_id ?? ''
+          return `${r.expense_date}|${amount}|${category}|${description}|${project}|${sub}|${memberId}`
+        }
+        const existingKeySet = new Set(existing.map(keyOf))
+
+        if (parsed.errors.length > 0) {
+          log('warn', { event: 'parse_errors', count: parsed.errors.length, sample: parsed.errors.slice(0, 10) })
+        }
+
+        for (let idx = 0; idx < validRows.length; idx++) {
+          if (job.canceled) throw new Error('导入已取消')
+          const row = validRows[idx]
+
+          try {
+            let memberId: number | undefined = undefined
+            if (row.member_name) {
+              const nameStr = row.member_name.trim()
+              let member = members.find((m) => m.name === nameStr)
+              if (!member) {
+                const newId = createMember(nameStr, defaultFamilyId)
+                member = { id: newId, name: nameStr, family_id: defaultFamilyId }
+                members.push(member)
+                log('info', { event: 'auto_create_member', name: nameStr, memberId: newId })
+              }
+              memberId = member.id
             }
-        }
-        
-        // 简单的数据校验
-        if (!amount || isNaN(Number(amount))) {
-          failedCount++
-          continue
+
+            const candidate = {
+              expense_date: row.expense_date,
+              amount: row.amount,
+              category: row.category,
+              description: row.description,
+              project: row.project || '',
+              sub_category: row.sub_category || '',
+              member_id: memberId,
+            }
+            const key = keyOf(candidate)
+            if (existingKeySet.has(key)) {
+              skippedCount++
+            } else {
+              createExpense({
+                project: row.project,
+                category: row.category,
+                sub_category: row.sub_category,
+                amount: row.amount,
+                expense_date: row.expense_date,
+                description: row.description,
+                voice_text: '',
+                member_id: memberId,
+                import_id: importId,
+              })
+              existingKeySet.add(key)
+              successCount++
+            }
+          } catch (e: any) {
+            failedCount++
+            log('error', { event: 'row_failed', message: e?.message || '写入失败', rowIndex: idx + 2 })
+          } finally {
+            job.processed++
+          }
+
+          if (job.processed % batchSize === 0 || job.processed === validRows.length) {
+            job.success = successCount
+            job.failed = failedCount
+            job.skipped = skippedCount
+            importJobs.set(importId, job)
+            updateImportHistoryProgress(importId, {
+              status: 'processing',
+              processed_rows: job.processed,
+              total_rows: total,
+              record_count: successCount,
+              failed_count: failedCount,
+              skipped_count: skippedCount,
+              error_message: parsed.errors.length ? `解析失败行数: ${parsed.errors.length}` : null,
+              finished_at: null,
+            })
+            wc.send('import-excel-progress', { ...job })
+            await yieldNow()
+          }
         }
 
-        // 处理日期 (Excel 日期可能是数字或字符串)
-        let dateStr = ''
-        if (typeof rawDate === 'number') {
-          // Excel 日期转 JS 日期
-          const date = new Date((rawDate - 25569) * 86400 * 1000)
-          dateStr = date.toISOString().split('T')[0]
-        } else {
-           dateStr = String(rawDate)
+        job.status = successCount > 0 ? 'success' : 'failed'
+        job.success = successCount
+        job.failed = failedCount
+        job.skipped = skippedCount
+        importJobs.set(importId, job)
+
+        updateImportHistoryProgress(importId, {
+          status: job.status === 'success' ? 'success' : 'failed',
+          processed_rows: job.processed,
+          total_rows: total,
+          record_count: successCount,
+          failed_count: failedCount,
+          skipped_count: skippedCount,
+          error_message:
+            job.status === 'success'
+              ? (parsed.errors.length ? `解析失败行数: ${parsed.errors.length}` : null)
+              : (parsed.errors.length ? '导入失败：有效行均写入失败' : '导入失败'),
+          finished_at: new Date().toISOString(),
+        })
+
+        wc.send('import-excel-done', { ...job, errors: parsed.errors })
+      } catch (e: any) {
+        job.status = 'failed'
+        job.errorMessage = e?.message || '导入失败'
+
+        const shouldRollback = job.errorMessage === '导入已取消'
+        if (shouldRollback) {
+          rollbackImportExpenses(importId)
+          successCount = 0
+          skippedCount = 0
         }
-
-        // 构造存入数据库的对象
-        const finalCategory = category || '其他'
-        const finalDesc = note || ''
-
-        // 自动去重逻辑：检查是否已存在完全相同的记录
-        const existing = getExpensesByDateRange(dateStr, dateStr).find(record => 
-          record.amount === Number(amount) && 
-          record.category === String(finalCategory) &&
-          (record.description || '') === finalDesc &&
-          (record.project || '') === (project ? String(project) : '') &&
-          (record.sub_category || '') === (subCategory ? String(subCategory) : '') &&
-          record.member_id === memberId
-        )
-
-        if (existing) {
-          // console.log(`Duplicate record found, skipping: ${dateStr} ${amount}`)
-          // We count it as skipped but don't throw error
-          // To implement 'skipped' count properly we need to change return type, 
-          // but for now let's just not insert it.
-          continue
-        }
-        
-        createExpense({
-          project: project ? String(project) : undefined,
-          category: String(finalCategory),
-          sub_category: subCategory ? String(subCategory) : undefined,
-          amount: Number(amount),
-          expense_date: dateStr,
-          description: finalDesc,
-           voice_text: '',
-           member_id: memberId || undefined,
-           import_id: importId
-         })
-        successCount++
-      } catch (e) {
-        console.error(`Row ${i + 1} import failed:`, e)
-        failedCount++
+        updateImportHistoryProgress(importId, {
+          status: shouldRollback ? 'canceled' : 'failed',
+          processed_rows: job.processed,
+          total_rows: job.total,
+          record_count: shouldRollback ? 0 : successCount,
+          failed_count: failedCount,
+          skipped_count: shouldRollback ? 0 : skippedCount,
+          error_message: job.errorMessage,
+          finished_at: new Date().toISOString(),
+        })
+        wc.send('import-excel-done', { ...job, errors: parsedErrors })
+      } finally {
+        importJobs.delete(importId)
       }
-    }
-    
-    // Update the actual count
-    updateImportHistoryCount(importId, successCount)
-    
-    return { success: successCount, failed: failedCount, importId }
+    })
+
+    return { importId, status: 'processing', total: 0, success: 0, failed: 0, skipped: 0, errors: [] }
   } catch (error: any) {
     throw new Error(`解析 Excel 失败: ${error.message}`)
   }
+})
+
+ipcMain.handle('get-import-job-status', async (_, importId: number) => {
+  return importJobs.get(importId) || null
+})
+
+ipcMain.handle('cancel-import-job', async (_, importId: number) => {
+  const job = importJobs.get(importId)
+  if (!job) return false
+  job.canceled = true
+  return true
 })
 
 // 下载预算模板
@@ -517,4 +697,8 @@ ipcMain.handle('get-all-members', async () => {
 
 ipcMain.handle('delete-member', async (_, id) => {
   return deleteMember(id)
+})
+
+ipcMain.handle('ensure-defaults', async () => {
+  ensureDefaults()
 })

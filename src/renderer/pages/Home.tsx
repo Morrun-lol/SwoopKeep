@@ -17,6 +17,24 @@ const getTimeProgress = () => {
     return Math.min((current / total) * 100, 100)
 }
 
+const parseYmd = (dateStr: string) => {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return new Date(dateStr)
+  const [y, m, d] = dateStr.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+
+const daysBetweenInclusive = (start: Date, end: Date) => {
+  const startMs = new Date(start.getFullYear(), start.getMonth(), start.getDate()).getTime()
+  const endMs = new Date(end.getFullYear(), end.getMonth(), end.getDate()).getTime()
+  return Math.floor((endMs - startMs) / (1000 * 3600 * 24)) + 1
+}
+
+const daysInMonth = (year: number, month: number) => {
+  return new Date(year, month, 0).getDate()
+}
+
+const monthKey = (year: number, month: number) => `${year}-${String(month).padStart(2, '0')}`
+
 export default function Home() {
   const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
@@ -138,17 +156,65 @@ export default function Home() {
       setRegularActual(currentRegularActual)
 
       // 3. Calculate Period Goal
+      const startDate = parseYmd(start)
+      const endDate = parseYmd(end)
+
+      const monthlyGoal = await (async () => {
+        try {
+          const cursor = new Date(startDate.getFullYear(), startDate.getMonth(), 1)
+          const endCursor = new Date(endDate.getFullYear(), endDate.getMonth(), 1)
+          const months: Array<{ year: number, month: number }> = []
+          while (cursor.getTime() <= endCursor.getTime()) {
+            months.push({ year: cursor.getFullYear(), month: cursor.getMonth() + 1 })
+            cursor.setMonth(cursor.getMonth() + 1)
+          }
+
+          const results = await Promise.all(months.map(async (m) => {
+            const budgets = await window.api.getMonthlyBudgets(m.year, m.month)
+            const total = (budgets || []).reduce((sum: number, b: any) => sum + Number(b.budget_amount || 0), 0)
+            return { ...m, total }
+          }))
+
+          const map = new Map<string, number>()
+          results.forEach(r => map.set(monthKey(r.year, r.month), r.total))
+
+          let goal = 0
+          let seg = new Date(startDate.getFullYear(), startDate.getMonth(), startDate.getDate())
+          while (seg.getTime() <= endDate.getTime()) {
+            const y = seg.getFullYear()
+            const m = seg.getMonth() + 1
+            const monthStart = new Date(y, m - 1, 1)
+            const monthEnd = new Date(y, m - 1, daysInMonth(y, m))
+            const segStart = seg
+            const segEnd = endDate.getTime() < monthEnd.getTime() ? endDate : monthEnd
+
+            const days = daysBetweenInclusive(segStart, segEnd)
+            const monthDays = daysInMonth(y, m)
+            const total = map.get(monthKey(y, m)) || 0
+            if (total > 0) {
+              goal += total * (days / monthDays)
+            }
+
+            seg = new Date(y, m - 1, monthDays)
+            seg.setDate(seg.getDate() + 1)
+          }
+
+          return goal
+        } catch {
+          return 0
+        }
+      })()
+
       let calculatedGoal = 0
-      if (timePeriod === 'year') {
-          // If natural year, use total annual goal
-          calculatedGoal = totalRegularAnnualGoal
+      if (monthlyGoal > 0) {
+        calculatedGoal = monthlyGoal
+      } else if (timePeriod === 'year') {
+        calculatedGoal = totalRegularAnnualGoal
       } else {
-          // Pro-rate based on days
-          const startDate = new Date(start)
-          const endDate = new Date(end)
-          const days = (endDate.getTime() - startDate.getTime()) / (1000 * 3600 * 24) + 1
-          calculatedGoal = (totalRegularAnnualGoal / 365) * days
+        const days = daysBetweenInclusive(startDate, endDate)
+        calculatedGoal = (totalRegularAnnualGoal / 365) * days
       }
+
       setPeriodGoal(calculatedGoal)
 
     } catch (error) {

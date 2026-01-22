@@ -89,3 +89,24 @@ export function getMemberById(id: number): Member | undefined {
   const stmt = db.prepare('SELECT * FROM members WHERE id = @id')
   return stmt.get({ id }) as Member | undefined
 }
+
+export function ensureDefaults(): void {
+  try {
+    const families = getAllFamilies()
+    let familyId = families[0]?.id
+
+    if (!familyId) {
+      familyId = createFamily('默认家庭组')
+    }
+
+    if (familyId) {
+      const members = getMembersByFamily(familyId)
+      const hasMe = members.some((m) => m.name === '我')
+      if (!hasMe) {
+        createMember('我', familyId)
+      }
+    }
+  } catch (error) {
+    console.error('Failed to ensure defaults:', error)
+  }
+}

@@ -321,11 +321,49 @@ export async function checkConnection(): Promise<{
 }
 
 
+const PARSE_CACHE_TTL_MS = 5 * 60 * 1000
+const PARSE_CACHE_MAX = 200
+const parseExpenseCache = new Map<string, { at: number; value: any }>()
+
+const SELECT_CACHE_TTL_MS = 60 * 1000
+let selectModelCache: { at: number; value: any } = { at: 0, value: null }
+
+const normalizeParseKey = (s: string) => s.trim().replace(/\s+/g, ' ').slice(0, 500)
+
+const parseCacheGet = (key: string) => {
+  const hit = parseExpenseCache.get(key)
+  if (!hit) return null
+  if (Date.now() - hit.at > PARSE_CACHE_TTL_MS) {
+    parseExpenseCache.delete(key)
+    return null
+  }
+  parseExpenseCache.delete(key)
+  parseExpenseCache.set(key, hit)
+  return hit.value
+}
+
+const parseCacheSet = (key: string, value: any) => {
+  parseExpenseCache.set(key, { at: Date.now(), value })
+  if (parseExpenseCache.size > PARSE_CACHE_MAX) {
+    const firstKey = parseExpenseCache.keys().next().value
+    if (firstKey) parseExpenseCache.delete(firstKey)
+  }
+}
+
 export async function parseExpense(text: string): Promise<any> {
+  const cacheKey = normalizeParseKey(text)
+  const cached = parseCacheGet(cacheKey)
+  if (cached) return cached
+
   // 使用智能选择策略
   let llmConfig
   try {
-      llmConfig = await selectBestModel('text')
+      if (selectModelCache.value && Date.now() - selectModelCache.at < SELECT_CACHE_TTL_MS) {
+          llmConfig = selectModelCache.value
+      } else {
+          llmConfig = await selectBestModel('text')
+          selectModelCache = { at: Date.now(), value: llmConfig }
+      }
   } catch (e) {
       console.warn('Smart select failed, falling back to DeepSeek check:', e)
       llmConfig = { provider: 'deepseek', apiKey: getDeepSeekApiKey() }
@@ -341,14 +379,11 @@ export async function parseExpense(text: string): Promise<any> {
   try {
       const structure = getExpenseStructure()
       if (structure && structure.length > 0) {
-          // 格式化为：项目 > 分类 > 子分类
-          const items = structure.map(s => `${s.project || '无项目'} > ${s.category} > ${s.sub_category || '无子分类'}`)
-          // 限制长度，防止 prompt 过长
-          if (items.length > 200) {
-             categoryHint = '请从用户已有的分类体系中选择最匹配的项目、分类和子分类。'
-          } else {
-             categoryHint = `请优先从以下已存在的分类体系中选择（格式：项目 > 分类 > 子分类）：\n${items.join('\n')}`
-          }
+          const items = structure.map(s => `${s.project || '无项目'}>${s.category}>${s.sub_category || '无子分类'}`)
+          const maxItems = 120
+          const clipped = items.slice(0, maxItems)
+          const suffix = items.length > clipped.length ? '；...' : ''
+          categoryHint = `已存在分类(项目>分类>子分类)，必须从中选择：${clipped.join('；')}${suffix}`
       }
       
       members = getAllMembers()
@@ -359,62 +394,23 @@ export async function parseExpense(text: string): Promise<any> {
       console.warn('Failed to get context for prompt:', e)
   }
 
-  const prompt = `
-  你是一个智能记账助手。以下文本可能来自用户的语音输入，也可能来自小票图片的 OCR 识别结果（因此可能包含大量无意义的字符、乱码或排版混乱）。
-  
-  请忽略文本中的乱码和无关信息，尽力提取出关键的消费信息。
-  
-  文本: "${text}"
-  
-  当前日期: ${today}
-  
-  ${categoryHint}
-  ${memberHint}
-  
-  **分类规则（严格执行）：**
-  1. 请**必须**从上述已存在的分类体系中选择最匹配的 "project" (项目), "category" (分类) 和 "sub_category" (子分类)。
-  2. 如果无法在现有体系中找到匹配项，请将其归类为 "日常开支" > "其他" > "其他"。
-  3. **严禁**创造用户现有体系之外的新分类名称，除非文本中极其明确地指出了一个新的分类结构（这种可能性极低）。
-  
-  请分析文本中包含的一笔或多笔消费记录。
-  
-  **重要处理规则：**
-  1. **OCR 纠错**：如果文本看起来像 OCR 结果（包含无意义符号），请尝试从中识别出 日期（如 202x-xx-xx）、金额（如 123.00, 123.5）、商户名称（如xx餐饮、xx超市）等关键模式。
-  2. **多笔拆分**：如果文本中包含多个独立的消费事件（例如“买咖啡花了20，打车花了30”），务必将其拆分为多条独立的记录返回。
-  3. **金额识别**：优先寻找带有 "合计"、"实付"、"总计"、"Total" 字样附近的金额。
-  4. **成员归属**：如果文本中明确提到了家庭成员（或从上下文可推断，如“儿子交学费”），请尝试将费用归属到对应成员。
-  
-  示例 1 (语音)：
-  输入："买了一杯咖啡花了20，中午吃了一碗牛肉面花了30"
-  输出：两个对象，咖啡(20元)，牛肉面(30元)。
+  const prompt = `你是记账语义解析器，输出 JSON 对象 {"expenses": [...]}。
 
-  示例 2 (OCR 乱码)：
-  输入："..LC本...合计 119.57 ... 2026-01-14 ..."
-  输出：一个对象，金额 119.57，日期 2026-01-14。
-  
-  请返回以下 JSON 格式的数据（必须是一个包含“expenses”数组的对象，不要包含 Markdown 代码块，直接返回 JSON 字符串）：
-  {
-    "expenses": [
-      {
-        "project": "项目名称",
-        "category": "分类名称(二级分类)",
-        "sub_category": "子分类名称(三级分类)",
-        "amount": 0.00,
-        "expense_date": "YYYY-MM-DD",
-        "description": "消费的具体内容描述(商户名/品名)",
-        "member_name": "成员名称(如果能识别到)",
-        "missing_info": [] // 如果缺少关键信息(如金额)，请在此列出
-      }
-    ]
-  }
-  `
+文本: "${text}"
+当前日期: ${today}
+${categoryHint}
+${memberHint}
+
+规则：
+1) project/category/sub_category 必须从已有分类体系选择；找不到则用 "日常开支" > "其他" > "其他"。
+2) 忽略 OCR 乱码与无关信息；支持多笔拆分。
+3) 只输出 JSON，不要 Markdown。`
   
   try {
     let rawContent = '{}'
     
     if (llmConfig.provider === 'deepseek') {
         const apiKey = llmConfig.apiKey.trim();
-        console.log(`[LLM] Using DeepSeek with Key: ${apiKey.substring(0, 8)}...`);
         const openai = new OpenAI({
             baseURL: DEEPSEEK_BASE_URL,
             apiKey: apiKey,
@@ -483,7 +479,7 @@ export async function parseExpense(text: string): Promise<any> {
          rawContent = text
     }
 
-    console.log(`[LLM] Response from ${llmConfig.provider}:`, rawContent)
+    
 
     // 去除可能存在的 Markdown 代码块标记
     const jsonStr = rawContent.replace(/```json\n?|\n?```/g, '').trim()
@@ -533,7 +529,9 @@ export async function parseExpense(text: string): Promise<any> {
     // We can change the return to { expenses: [...], provider: '...' }
     // But we need to check where parseExpense is called.
     
-    return { expenses: parsedExpenses, provider: llmConfig.provider }
+    const finalResult = { expenses: parsedExpenses, provider: llmConfig.provider }
+    parseCacheSet(cacheKey, finalResult)
+    return finalResult
 
   } catch (error: any) {
     console.error('Parsing error:', error)

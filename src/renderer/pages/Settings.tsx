@@ -10,6 +10,7 @@ export default function Settings() {
   const [isUploading, setIsUploading] = useState(false)
   const [message, setMessage] = useState('')
   const [importHistory, setImportHistory] = useState<any[]>([])
+  const [importJobs, setImportJobs] = useState<Record<number, any>>({})
 
   // Env Config State
   // const [envConfig, setEnvConfig] = useState({
@@ -22,7 +23,30 @@ export default function Settings() {
 
   useEffect(() => {
     loadHistory()
-    // loadEnvConfig()
+    const unsubProgress = window.api.onImportExcelProgress
+      ? window.api.onImportExcelProgress((payload: any) => {
+          if (!payload?.importId) return
+          setImportJobs((prev) => ({ ...prev, [payload.importId]: payload }))
+        })
+      : undefined
+
+    const unsubDone = window.api.onImportExcelDone
+      ? window.api.onImportExcelDone((payload: any) => {
+          if (!payload?.importId) return
+          setImportJobs((prev) => ({ ...prev, [payload.importId]: payload }))
+          const skipped = payload.skipped ? `, 跳过重复: ${payload.skipped}` : ''
+          const details = payload.errors?.length
+            ? `\n失败明细(前5条)：${payload.errors.slice(0, 5).map((e: any) => `\n- 第${e.rowNumber}行：${e.message}`).join('')}`
+            : ''
+          setMessage(`✅ 导入完成! 成功: ${payload.success || 0}, 失败: ${payload.failed || 0}${skipped}${details}`)
+          loadHistory()
+        })
+      : undefined
+
+    return () => {
+      unsubProgress?.()
+      unsubDone?.()
+    }
   }, [])
 
   // const loadEnvConfig = async () => {
@@ -50,6 +74,18 @@ export default function Settings() {
     try {
         const history = await window.api.getImportHistory()
         setImportHistory(history)
+
+        const processing = (history || []).filter((r: any) => r?.status === 'processing')
+        if (processing.length > 0 && window.api.getImportJobStatus) {
+          const statuses = await Promise.all(
+            processing.map((r: any) => window.api.getImportJobStatus(r.id).catch(() => null))
+          )
+          const patch: Record<number, any> = {}
+          statuses.forEach((s: any) => {
+            if (s?.importId) patch[s.importId] = s
+          })
+          if (Object.keys(patch).length > 0) setImportJobs((prev) => ({ ...prev, ...patch }))
+        }
     } catch (e) {
         console.error('Failed to load history', e)
     }
@@ -94,20 +130,32 @@ export default function Settings() {
     setMessage('正在处理...')
 
     try {
-      // 读取文件并通过 IPC 发送给主进程
-      // Pass filename somehow? The IPC only accepts buffer. 
-      // We will need to modify backend or assume backend generates name.
-      // But user wants "Data Upload Records". 
-      // Actually `importExcel` in backend now generates a name with timestamp.
-      // Ideally we should pass the filename.
-      // Since I can't easily change the signature of `importExcel` without breaking other things potentially (though only used here),
-      // I will rely on the backend generated name for now, or if I can change `importExcel` to accept `file.name`.
-      // Let's stick to current implementation where backend generates a name.
-      
       const arrayBuffer = await file.arrayBuffer()
-      const result = await window.api.importExcel(arrayBuffer)
-      setMessage(`✅ 导入成功! 成功: ${result.success}, 失败: ${result.failed}`)
-      loadHistory() // Refresh list
+      const result = await window.api.importExcel(arrayBuffer, file.name)
+
+      if (result?.importId && result?.status === 'processing') {
+        setMessage(`📤 已开始导入（共 ${result.total || 0} 行），可在下方查看进度。`)
+        setImportJobs((prev) => ({
+          ...prev,
+          [result.importId!]: {
+            importId: result.importId,
+            status: 'processing',
+            total: result.total || 0,
+            processed: 0,
+            success: 0,
+            failed: result.failed || 0,
+            skipped: 0,
+          },
+        }))
+        loadHistory()
+      } else {
+        const skipped = result?.skipped ? `, 跳过重复: ${result.skipped}` : ''
+        const details = result?.errors?.length
+          ? `\n失败明细(前5条)：${result.errors.slice(0, 5).map((er: any) => `\n- 第${er.rowNumber}行：${er.message}`).join('')}`
+          : ''
+        setMessage(`✅ 导入完成! 成功: ${result?.success || 0}, 失败: ${result?.failed || 0}${skipped}${details}`)
+        loadHistory()
+      }
     } catch (error: any) {
       console.error(error)
       setMessage(`❌ 导入失败: ${error.message}`)
@@ -279,11 +327,44 @@ export default function Settings() {
                   />
                 </label>
                 {message && (
-                  <span className={`text-sm ${message.startsWith('✅') ? 'text-emerald-600' : 'text-red-600'}`}>
+                  <span className={`text-sm whitespace-pre-line ${message.startsWith('✅') ? 'text-emerald-600' : message.startsWith('📤') ? 'text-blue-600' : 'text-red-600'}`}>
                     {message}
                   </span>
                 )}
               </div>
+
+              {Object.values(importJobs).some((j: any) => j?.status === 'processing') && (
+                <div className="mt-3 space-y-2">
+                  {Object.values(importJobs)
+                    .filter((j: any) => j?.status === 'processing')
+                    .slice(0, 1)
+                    .map((job: any) => {
+                      const total = Number(job.total || 0)
+                      const processed = Number(job.processed || 0)
+                      const pct = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0
+                      return (
+                        <div key={job.importId} className="bg-blue-50 border border-blue-100 rounded-xl p-4">
+                          <div className="flex items-center justify-between">
+                            <div className="text-sm text-blue-700">正在导入... {pct}%（{processed}/{total}）</div>
+                            <button
+                              onClick={async () => {
+                                if (!confirm('确定要取消本次导入吗？')) return
+                                await window.api.cancelImportJob(job.importId)
+                              }}
+                              className="text-xs text-blue-600 hover:text-blue-800 underline"
+                            >
+                              取消
+                            </button>
+                          </div>
+                          <div className="mt-2 h-2 bg-blue-100 rounded">
+                            <div className="h-2 bg-blue-500 rounded" style={{ width: `${pct}%` }} />
+                          </div>
+                          <div className="mt-2 text-xs text-blue-600">成功: {job.success || 0}，失败: {job.failed || 0}，跳过: {job.skipped || 0}</div>
+                        </div>
+                      )
+                    })}
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -367,7 +448,15 @@ export default function Settings() {
                                     </span>
                                 </td>
                                 <td className="px-6 py-4 font-mono text-gray-600">
-                                    {record.record_count} 条
+                                    {record.status === 'processing'
+                                      ? (() => {
+                                          const job = importJobs[record.id]
+                                          const processed = Number(job?.processed || record.processed_rows || 0)
+                                          const total = Number(job?.total || record.total_rows || 0)
+                                          const pct = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0
+                                          return `${record.record_count || 0}/${total || '-'} 条（处理中 ${pct}%）`
+                                        })()
+                                      : `${record.record_count || 0} 条`}
                                 </td>
                                 <td className="px-6 py-4 text-right">
                                     <button 

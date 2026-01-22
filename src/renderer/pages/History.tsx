@@ -157,7 +157,7 @@ export default function History() {
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
               <input
                 type="text"
-                placeholder="搜索备注或语音内容..."
+                placeholder="搜索备注或咻记一下内容..."
                 value={searchKeyword}
                 onChange={(e) => setSearchKeyword(e.target.value)}
                 className="w-full pl-10 pr-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none"
@@ -258,7 +258,7 @@ export default function History() {
                             <p className="font-medium text-gray-900 truncate">{expense.description}</p>
                             <p className="text-sm text-gray-500">{expense.category}</p>
                             {expense.voice_text && (
-                              <p className="text-xs text-gray-400 mt-1 truncate">语音: {expense.voice_text}</p>
+                              <p className="text-xs text-gray-400 mt-1 truncate">咻记一下: {expense.voice_text}</p>
                             )}
                           </div>
                         </div>

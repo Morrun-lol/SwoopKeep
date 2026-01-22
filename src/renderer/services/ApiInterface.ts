@@ -1,7 +1,7 @@
 
 export interface ExpenseApi {
   transcribeAudio(buffer: ArrayBuffer): Promise<string>
-  parseExpense(text: string): Promise<any>
+  parseExpense(text: string, context?: any): Promise<any>
   checkLLMConnection(): Promise<boolean>
   testiFlytekConnection(): Promise<{ success: boolean; message: string; logs: string[] }>
   createExpense(data: any): Promise<number>
@@ -27,7 +27,7 @@ export interface ExpenseApi {
   }>
   downloadTemplate(): Promise<boolean>
   downloadBudgetTemplate(): Promise<boolean>
-  importExcel(buffer: ArrayBuffer): Promise<{ success: number, failed: number }>
+  importExcel(buffer: ArrayBuffer, fileName?: string): Promise<{ success: number, failed: number, skipped?: number, importId?: number, errors?: { rowNumber: number, message: string }[] }>
   getExpenseComposition(startDate: string, endDate: string, level?: string, parentValue?: string): Promise<any[]>
   getExpenseTrend(startDate: string, endDate: string, dimension?: string, filter?: any): Promise<any[]>
   getYearGoals(year: number, memberId?: number): Promise<{
@@ -56,6 +56,14 @@ export interface ExpenseApi {
   addExpenseType(name: string): Promise<boolean>
   updateExpenseType(id: number, name: string): Promise<boolean>
   toggleExpenseType(id: number, isActive: boolean): Promise<boolean>
+
+  // Monthly Budgets
+  getMonthlyBudgets(year: number, month: number): Promise<any[]>
+  saveMonthlyBudget(budget: any): Promise<boolean>
+  deleteMonthlyBudget(id: number): Promise<boolean>
+
+  // Defaults
+  ensureDefaults(): Promise<void>
 
   // Family Ledger
   createFamily(name: string): Promise<number>

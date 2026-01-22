@@ -5,8 +5,8 @@ export class ElectronApi implements ExpenseApi {
   transcribeAudio(buffer: ArrayBuffer): Promise<string> {
     return window.electron.ipcRenderer.invoke('transcribe-audio', buffer)
   }
-  parseExpense(text: string): Promise<any> {
-    return window.electron.ipcRenderer.invoke('parse-expense', text)
+  parseExpense(text: string, context?: any): Promise<any> {
+    return window.electron.ipcRenderer.invoke('parse-expense', text, context)
   }
   checkLLMConnection(): Promise<boolean> {
     return window.electron.ipcRenderer.invoke('check-llm-connection')
@@ -59,8 +59,8 @@ export class ElectronApi implements ExpenseApi {
   downloadBudgetTemplate(): Promise<boolean> {
     return window.electron.ipcRenderer.invoke('download-budget-template')
   }
-  importExcel(buffer: ArrayBuffer): Promise<{ success: number, failed: number }> {
-    return window.electron.ipcRenderer.invoke('import-excel', buffer)
+  importExcel(buffer: ArrayBuffer, fileName?: string): Promise<{ success: number, failed: number, skipped?: number, importId?: number, errors?: { rowNumber: number, message: string }[] }> {
+    return window.electron.ipcRenderer.invoke('import-excel', buffer, fileName)
   }
   getExpenseComposition(startDate: string, endDate: string, level?: string, parentValue?: string): Promise<any[]> {
     return window.electron.ipcRenderer.invoke('get-expense-composition', startDate, endDate, level, parentValue)
@@ -115,6 +115,22 @@ export class ElectronApi implements ExpenseApi {
   }
   toggleExpenseType(id: number, isActive: boolean): Promise<boolean> {
     return window.electron.ipcRenderer.invoke('toggle-expense-type', id, isActive)
+  }
+
+  getMonthlyBudgets(year: number, month: number): Promise<any[]> {
+    return window.electron.ipcRenderer.invoke('get-monthly-budgets', year, month)
+  }
+
+  saveMonthlyBudget(budget: any): Promise<boolean> {
+    return window.electron.ipcRenderer.invoke('save-monthly-budget', budget)
+  }
+
+  deleteMonthlyBudget(id: number): Promise<boolean> {
+    return window.electron.ipcRenderer.invoke('delete-monthly-budget', id)
+  }
+
+  ensureDefaults(): Promise<void> {
+    return window.electron.ipcRenderer.invoke('ensure-defaults')
   }
   createFamily(name: string): Promise<number> {
     return window.electron.ipcRenderer.invoke('create-family', name)

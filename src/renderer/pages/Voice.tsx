@@ -2,13 +2,24 @@ import { useState, useRef, useEffect, useMemo, ChangeEvent } from 'react'
 import CryptoJS from 'crypto-js'
 import { ChevronDown, Check, Plus, ArrowLeft, X, Wifi, Loader2, Info, Camera, Image as ImageIcon } from 'lucide-react'
 
-// 科大讯飞配置 (请在 .env 中配置，这里通过 window.api 暴露或直接硬编码测试)
-// 实际项目中建议通过 preload 注入
-const APPID = 'c9243c11' // 占位符，请替换
-const API_SECRET = 'MTM2OWU4YjFlOTM0NDU3YjRmZDZiNDIw' // 占位符，请替换
-const API_KEY = '4433bf4eb8921a8745f3ede0f9acbbd0' // 占位符，请替换
-
 export default function Voice() {
+  const DEFAULT_EXPENSE_STRUCTURE = useMemo(
+    () => [
+      { project: '日常开支', category: '餐饮', sub_category: '饮品' },
+      { project: '日常开支', category: '餐饮', sub_category: '正餐' },
+      { project: '日常开支', category: '餐饮', sub_category: '零食' },
+      { project: '日常开支', category: '交通', sub_category: '打车' },
+      { project: '日常开支', category: '交通', sub_category: '公共交通' },
+      { project: '日常开支', category: '购物', sub_category: '日用' },
+      { project: '日常开支', category: '购物', sub_category: '食品' },
+      { project: '日常开支', category: '娱乐', sub_category: '电影' },
+      { project: '日常开支', category: '医疗', sub_category: '药品' },
+      { project: '日常开支', category: '教育', sub_category: '培训' },
+      { project: '日常开支', category: '住房', sub_category: '房租' },
+      { project: '日常开支', category: '其他', sub_category: '其他' },
+    ],
+    []
+  )
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [isRecording, setIsRecording] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
@@ -34,7 +45,9 @@ export default function Voice() {
 
   useEffect(() => {
       // Load expense structure for selector
-      window.api.getExpenseStructure().then(setExpenseStructure).catch(console.error)
+      window.api.getExpenseStructure()
+        .then((s: any[]) => setExpenseStructure(s && s.length > 0 ? s : DEFAULT_EXPENSE_STRUCTURE))
+        .catch(() => setExpenseStructure(DEFAULT_EXPENSE_STRUCTURE))
       // Load members and families
       Promise.all([
           window.api.getAllMembers(),
@@ -305,30 +318,65 @@ export default function Voice() {
       
       // Send to main process
       setIsProcessing(true)
+      setProcessingLabel('语音识别中...')
       try {
           // Need to send ArrayBuffer. pcmData.buffer is the one.
           // Note: pcmData is Int8Array view of Int16 buffer.
           // transAudioData returns Int8Array, but underlying buffer is Int16.
-          const resultText = await window.api.transcribeAudio(pcmData.buffer)
+          lastAudioBufferRef.current = pcmData.buffer
+          const resultText = await withTimeout(
+            window.api.transcribeAudio(pcmData.buffer),
+            30000,
+            '语音识别超时，请检查网络后重试'
+          )
           setTranscribedText(resultText)
           
           // Auto parse
-          handleParse(resultText)
+          await handleParse(resultText)
       } catch (e: any) {
           console.error('Transcription failed:', e)
           setErrorMessage('识别失败: ' + e.message)
           setIsProcessing(false)
+          setProcessingLabel('')
       }
   }
   
   const [processingProvider, setProcessingProvider] = useState<string>('')
+  const [processingLabel, setProcessingLabel] = useState('')
+  const lastAudioBufferRef = useRef<ArrayBuffer | null>(null)
+
+  const withTimeout = async <T,>(promise: Promise<T>, ms: number, message: string): Promise<T> => {
+    let t: any
+    const timeout = new Promise<never>((_, reject) => {
+      t = setTimeout(() => reject(new Error(message)), ms)
+    })
+    try {
+      return await Promise.race([promise, timeout])
+    } finally {
+      clearTimeout(t)
+    }
+  }
+
+  const getProviderLabel = (provider?: string) => {
+    if (!provider) return ''
+    if (provider === 'deepseek') return 'DeepSeek'
+    if (provider === 'openai') return 'OpenAI'
+    if (provider === 'gemini') return 'Gemini'
+    if (provider === 'tesseract') return '本地 OCR'
+    return provider
+  }
 
   // 触发语义解析
   const handleParse = async (text: string) => {
       if (!text) return
       setIsProcessing(true)
+      setProcessingLabel('智能解析中...')
       try {
-          const result = await window.api.parseExpense(text)
+          const result = await withTimeout(
+            window.api.parseExpense(text, { hierarchy: expenseStructure, members }),
+            30000,
+            '解析超时，请检查网络后重试'
+          )
           // 兼容旧接口，如果是数组则 provider 为 unknown，如果是对象则解构
           // 但是 IPC 返回的一定是序列化后的对象。
           // 之前我们修改了 parseExpense 返回 { expenses: [...], provider: '...' }
@@ -336,7 +384,7 @@ export default function Voice() {
           
           if (result.expenses && Array.isArray(result.expenses)) {
               setParsedData(result.expenses)
-              if (result.provider) setProcessingProvider(result.provider)
+              if (result.provider) setProcessingProvider(getProviderLabel(result.provider))
           } else if (Array.isArray(result)) {
                // Fallback for old style if needed, though we changed backend
                setParsedData(result)
@@ -350,7 +398,8 @@ export default function Voice() {
           setErrorMessage(err.message)
       } finally {
           setIsProcessing(false)
-          setProcessingProvider('') // Reset after done? Or keep it to show "Used XXX"? 
+          setProcessingLabel('')
+          // keep provider for debugging / last used display
           // Requirement says "正在用XXX智能解析", implies during processing.
           // But during processing we don't know the provider YET until backend returns?
           // Actually, `selectBestModel` happens in backend.
@@ -395,12 +444,36 @@ export default function Voice() {
       }
   }
 
+  const handleRetryTranscribe = async () => {
+    const buf = lastAudioBufferRef.current
+    if (!buf || isProcessing) return
+
+    setErrorMessage('')
+    setIsProcessing(true)
+    setProcessingLabel('语音识别中...')
+    try {
+      const resultText = await withTimeout(
+        window.api.transcribeAudio(buf),
+        30000,
+        '语音识别超时，请检查网络后重试'
+      )
+      setTranscribedText(resultText)
+      await handleParse(resultText)
+    } catch (e: any) {
+      setErrorMessage('识别失败: ' + (e?.message || '未知错误'))
+    } finally {
+      setIsProcessing(false)
+      setProcessingLabel('')
+    }
+  }
+
   const handleImageUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
     if (!file) return
 
     if (isProcessing) return
     setIsProcessing(true)
+    setProcessingLabel('图片识别中...')
     setInputType('image')
     setErrorMessage('')
     setParsedData(null)
@@ -410,18 +483,17 @@ export default function Voice() {
     try {
       const buffer = await file.arrayBuffer()
       // Call analyze first? No, recognizeImage returns provider now.
-      const result = await window.api.recognizeImage(buffer)
+      const result = await withTimeout(
+        window.api.recognizeImage(buffer),
+        30000,
+        '图片识别超时，请检查网络后重试'
+      )
       // result is { text, provider }
       
       const text = result.text
-      const provider = result.provider // 'openai', 'gemini', 'tesseract'
-      
-      // Map provider code to name
-      const providerName = provider === 'openai' ? 'OpenAI Vision' : 
-                           provider === 'gemini' ? 'Gemini Vision' : 
-                           provider === 'tesseract' ? '本地 OCR' : 'AI'
-      
-      setProcessingProvider(providerName)
+      const provider = result.provider
+
+      setProcessingProvider(getProviderLabel(provider))
 
       if (!text || text.trim().length === 0) {
         throw new Error('未能从图片中识别出文字')
@@ -431,13 +503,14 @@ export default function Voice() {
       
       // Now parse text. Parse also has a provider.
       // We can update the message.
-      await handleParse(text) 
+      await handleParse(text)
       
     } catch (err: any) {
       console.error('Image recognition failed:', err)
       setErrorMessage(err.message || '图片识别失败')
     } finally {
       setIsProcessing(false)
+      setProcessingLabel('')
       // setProcessingProvider('') // Keep it visible? No, process done.
       if (fileInputRef.current) {
         fileInputRef.current.value = ''
@@ -464,6 +537,7 @@ export default function Voice() {
     if (!dataToSave || dataToSave.length === 0) return
 
     setIsProcessing(true)
+    setProcessingLabel('保存中...')
     setErrorMessage('')
     setSuccessMessage('')
 
@@ -494,6 +568,7 @@ export default function Voice() {
       setErrorMessage(err.message || '保存失败')
     } finally {
       setIsProcessing(false)
+      setProcessingLabel('')
     }
   }
 
@@ -553,6 +628,7 @@ export default function Voice() {
   const handleTest = async () => {
     if (isProcessing) return
     setIsProcessing(true)
+    setProcessingLabel('测试中...')
     setErrorMessage('')
     setParsedData(null)
     
@@ -560,14 +636,13 @@ export default function Voice() {
     setTranscribedText(testText)
     
     try {
-      // 直接调用解析接口
-      const result = await window.api.parseExpense(testText)
-      setParsedData(result)
+      await handleParse(testText)
     } catch (err: any) {
       console.error('Test processing error:', err)
       setErrorMessage(err.message || '测试失败')
     } finally {
       setIsProcessing(false)
+      setProcessingLabel('')
     }
   }
 
@@ -744,7 +819,7 @@ export default function Voice() {
   return (
     <div className="space-y-6">
       <h1 className="text-2xl font-bold text-gray-900 flex justify-between items-center">
-        <span>语音记账</span>
+        <span>咻记一下</span>
         <div className="flex gap-2">
           <button 
             onClick={handleNetworkCheck}
@@ -807,9 +882,21 @@ export default function Voice() {
               {isProcessing ? '⏳' : (isRecording ? '⏹️' : '🎙️')}
             </span>
           </div>
+
+          <button
+            onClick={handleToggleRecording}
+            disabled={isProcessing}
+            className={`mb-4 px-6 py-2 rounded-full text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+              isRecording ? 'bg-red-600 text-white hover:bg-red-700' : 'bg-emerald-600 text-white hover:bg-emerald-700'
+            }`}
+          >
+            {isRecording ? '停止' : '咻记一下'}
+          </button>
           
           <p className="text-gray-500 mb-2 font-medium">
-            {isProcessing ? `正在用${processingProvider || 'AI 大模型'}智能解析...` : (isRecording ? '正在录音... 点击停止' : '点击麦克风开始说话，或上传小票')}
+            {isProcessing
+              ? (processingLabel || `正在用${processingProvider || 'AI 大模型'}智能解析...`)
+              : (isRecording ? '正在录音... 点击停止' : '点击“咻记一下”开始说话，或上传小票')}
           </p>
           <p className="text-xs text-gray-400">
              示例："今天中午吃牛肉面花了25元"
@@ -845,6 +932,16 @@ export default function Voice() {
           {errorMessage && (
             <div className="bg-red-50 text-red-600 px-4 py-2 rounded-lg mt-4 text-sm max-w-xs text-center">
               {errorMessage}
+              {!isProcessing && inputType === 'voice' && !!lastAudioBufferRef.current && (
+                <div className="mt-2">
+                  <button
+                    onClick={handleRetryTranscribe}
+                    className="text-xs text-red-700 underline hover:text-red-800"
+                  >
+                    重试识别
+                  </button>
+                </div>
+              )}
             </div>
           )}
           
@@ -924,7 +1021,12 @@ export default function Voice() {
 
           {parsedData && parsedData.length > 0 && (
             <div className="space-y-4">
-              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-2">智能解析 ({parsedData.length}笔)</h3>
+              <div className="flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">智能解析 ({parsedData.length}笔)</h3>
+                {processingProvider && (
+                  <div className="text-xs text-gray-400">模型: {processingProvider}</div>
+                )}
+              </div>
               
               {(isEditing ? editData : parsedData)?.map((data: any, index: number) => (
                 <div key={index} className="bg-white p-6 rounded-2xl shadow-sm border border-gray-200 relative transition-all hover:shadow-md">

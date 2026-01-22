@@ -13,11 +13,12 @@
     "check": "tsc -b --noEmit",
     "dist": "npm run build && electron-builder",
     "build:web": "vite build -c vite.config.web.ts",
-    "dev:web": "vite -c vite.config.web.ts"
+    "dev:web": "vite -c vite.config.web.ts",
+    "dev:api": "node api/server.js"
   },
   "build": {
     "appId": "com.trae.expense.tracker",
-    "productName": "Trae Expense Tracker",
+    "productName": "SwoopKeep",
     "directories": {
       "output": "dist"
     },
@@ -58,6 +59,8 @@
     "crypto-js": "^4.2.0",
     "date-fns": "^4.1.0",
     "dotenv": "^17.2.3",
+    "cors": "^2.8.5",
+    "express": "^4.21.2",
     "jimp": "^1.6.0",
     "lucide-react": "^0.511.0",
     "node-xlsx": "^0.24.0",

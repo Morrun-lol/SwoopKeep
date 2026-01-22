@@ -7,7 +7,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-        <string>TraeExpenseTracker</string>
+	<string>咻记</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -53,6 +53,15 @@
 	<string>我们需要相机权限来拍摄小票进行识别。</string>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>我们需要相册权限来选择小票图片进行识别。</string>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>我们需要访问本地网络以连接到语音识别与语义解析服务。</string>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsArbitraryLoads</key>
+		<true/>
+		<key>NSAllowsArbitraryLoadsInWebContent</key>
+		<true/>
+	</dict>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
 </dict>

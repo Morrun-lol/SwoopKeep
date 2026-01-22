@@ -3,7 +3,7 @@ import { contextBridge, ipcRenderer } from 'electron'
 // Custom APIs for renderer
 const api = {
   transcribeAudio: (buffer: ArrayBuffer) => ipcRenderer.invoke('transcribe-audio', buffer),
-  parseExpense: (text: string) => ipcRenderer.invoke('parse-expense', text),
+  parseExpense: (text: string, context?: any) => ipcRenderer.invoke('parse-expense', text, context),
   checkLLMConnection: () => ipcRenderer.invoke('check-llm-connection'),
   testiFlytekConnection: () => ipcRenderer.invoke('test-iflytek-connection'),
   createExpense: (data: any) => ipcRenderer.invoke('create-expense', data),
@@ -21,7 +21,19 @@ const api = {
   checkNetworkStatus: () => ipcRenderer.invoke('check-network-status'),
   downloadTemplate: () => ipcRenderer.invoke('download-template'),
   downloadBudgetTemplate: () => ipcRenderer.invoke('download-budget-template'),
-  importExcel: (buffer: ArrayBuffer) => ipcRenderer.invoke('import-excel', buffer),
+  importExcel: (buffer: ArrayBuffer, fileName?: string) => ipcRenderer.invoke('import-excel', buffer, fileName),
+  getImportJobStatus: (importId: number) => ipcRenderer.invoke('get-import-job-status', importId),
+  cancelImportJob: (importId: number) => ipcRenderer.invoke('cancel-import-job', importId),
+  onImportExcelProgress: (func: (payload: any) => void) => {
+    const subscription = (_event: any, payload: any) => func(payload)
+    ipcRenderer.on('import-excel-progress', subscription)
+    return () => ipcRenderer.removeListener('import-excel-progress', subscription)
+  },
+  onImportExcelDone: (func: (payload: any) => void) => {
+    const subscription = (_event: any, payload: any) => func(payload)
+    ipcRenderer.on('import-excel-done', subscription)
+    return () => ipcRenderer.removeListener('import-excel-done', subscription)
+  },
   getExpenseComposition: (startDate: string, endDate: string, level?: string, parentValue?: string) => ipcRenderer.invoke('get-expense-composition', startDate, endDate, level, parentValue),
   getExpenseTrend: (startDate: string, endDate: string, dimension?: string, filter?: any) => ipcRenderer.invoke('get-expense-trend', startDate, endDate, dimension, filter),
   getYearGoals: (year: number, memberId?: number) => ipcRenderer.invoke('get-year-goals', year, memberId),
@@ -40,6 +52,14 @@ const api = {
   addExpenseType: (name: string) => ipcRenderer.invoke('add-expense-type', name),
   updateExpenseType: (id: number, name: string) => ipcRenderer.invoke('update-expense-type', id, name),
   toggleExpenseType: (id: number, isActive: boolean) => ipcRenderer.invoke('toggle-expense-type', id, isActive),
+
+  // Monthly Budgets
+  getMonthlyBudgets: (year: number, month: number) => ipcRenderer.invoke('get-monthly-budgets', year, month),
+  saveMonthlyBudget: (budget: any) => ipcRenderer.invoke('save-monthly-budget', budget),
+  deleteMonthlyBudget: (id: number) => ipcRenderer.invoke('delete-monthly-budget', id),
+
+  // Defaults
+  ensureDefaults: () => ipcRenderer.invoke('ensure-defaults'),
   
   // Env Config
   getEnvConfig: () => ipcRenderer.invoke('get-env-config'),

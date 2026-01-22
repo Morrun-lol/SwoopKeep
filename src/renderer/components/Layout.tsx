@@ -7,7 +7,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
   const navItems = [
     { icon: Home, label: '首页', path: '/' },
-    { icon: Mic, label: '语音记账', path: '/voice' },
+    { icon: Mic, label: '咻记一下', path: '/voice' },
     { icon: Target, label: '预算目标', path: '/budget-config' },
     { icon: Users, label: '用户账本', path: '/user-ledger' },
     { icon: History, label: '历史记录', path: '/history' },
@@ -22,7 +22,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <div className="w-8 h-8 bg-emerald-500 rounded-lg flex items-center justify-center">
             <Mic className="text-white w-5 h-5" />
           </div>
-          <span className="text-xl font-bold text-gray-800">语音记账助手</span>
+          <span className="text-xl font-bold text-gray-800">咻记一下助手</span>
         </div>
 
         <nav className="flex-1 p-4 space-y-1">

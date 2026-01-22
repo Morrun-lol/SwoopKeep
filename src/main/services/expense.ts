@@ -42,6 +42,17 @@ export interface BudgetExpenseType {
   is_active: number // SQLite boolean is 0 or 1
 }
 
+export interface MonthlyBudget {
+  id?: number
+  project?: string
+  category: string
+  sub_category?: string
+  budget_amount: number
+  year: number
+  month: number
+  created_at?: string
+}
+
 export function createExpense(data: ExpenseRecord): number {
   const stmt = db.prepare(`
     INSERT INTO expense_records (project, category, sub_category, amount, expense_date, description, voice_text, member_id, import_id)
@@ -523,13 +534,97 @@ export function addExpenseHierarchyItem(project: string, category: string, sub_c
   }
 }
 
+export function getMonthlyBudgets(year: number, month: number): MonthlyBudget[] {
+  const stmt = db.prepare(`
+    SELECT * FROM monthly_budgets
+    WHERE year = @year AND month = @month
+    ORDER BY project, category, sub_category
+  `)
+  return stmt.all({ year, month }) as MonthlyBudget[]
+}
+
+export function saveMonthlyBudget(budget: MonthlyBudget): boolean {
+  try {
+    const stmt = db.prepare(`
+      INSERT INTO monthly_budgets (project, category, sub_category, budget_amount, year, month)
+      VALUES (@project, @category, @sub_category, @budget_amount, @year, @month)
+      ON CONFLICT(project, category, sub_category, year, month)
+      DO UPDATE SET
+        budget_amount = excluded.budget_amount,
+        created_at = CURRENT_TIMESTAMP
+    `)
+
+    stmt.run({
+      project: budget.project ?? '',
+      category: budget.category,
+      sub_category: budget.sub_category ?? '',
+      budget_amount: budget.budget_amount,
+      year: budget.year,
+      month: budget.month
+    })
+    return true
+  } catch (e) {
+    console.error('Failed to save monthly budget:', e)
+    return false
+  }
+}
+
+export function deleteMonthlyBudget(id: number): boolean {
+  try {
+    const stmt = db.prepare('DELETE FROM monthly_budgets WHERE id = @id')
+    const result = stmt.run({ id })
+    return result.changes > 0
+  } catch (e) {
+    console.error('Failed to delete monthly budget:', e)
+    return false
+  }
+}
+
 // Import History Management
 export function addImportHistory(fileName: string, type: string, count: number): number {
   const stmt = db.prepare(`
-    INSERT INTO import_history (file_name, import_type, record_count)
-    VALUES (@fileName, @type, @count)
+    INSERT INTO import_history (
+      file_name,
+      import_type,
+      record_count,
+      status,
+      total_rows,
+      processed_rows,
+      failed_count,
+      skipped_count,
+      file_size_bytes,
+      error_message,
+      updated_at,
+      finished_at
+    )
+    VALUES (
+      @fileName,
+      @type,
+      @count,
+      @status,
+      @total_rows,
+      @processed_rows,
+      @failed_count,
+      @skipped_count,
+      @file_size_bytes,
+      @error_message,
+      CURRENT_TIMESTAMP,
+      @finished_at
+    )
   `)
-  const result = stmt.run({ fileName, type, count })
+  const result = stmt.run({
+    fileName,
+    type,
+    count,
+    status: 'processing',
+    total_rows: 0,
+    processed_rows: 0,
+    failed_count: 0,
+    skipped_count: 0,
+    file_size_bytes: 0,
+    error_message: null,
+    finished_at: null
+  })
   return result.lastInsertRowid as number
 }
 
@@ -542,9 +637,60 @@ export function getImportHistory() {
 
 export function updateImportHistoryCount(id: number, count: number) {
   const stmt = db.prepare(`
-    UPDATE import_history SET record_count = @count WHERE id = @id
+    UPDATE import_history
+    SET record_count = @count,
+        updated_at = CURRENT_TIMESTAMP
+    WHERE id = @id
   `)
   stmt.run({ id, count })
+}
+
+export function updateImportHistoryProgress(
+  id: number,
+  patch: {
+    status?: 'processing' | 'success' | 'failed' | 'canceled'
+    total_rows?: number
+    processed_rows?: number
+    record_count?: number
+    failed_count?: number
+    skipped_count?: number
+    file_size_bytes?: number
+    error_message?: string | null
+    finished_at?: string | null
+  }
+) {
+  const fields: string[] = ['updated_at = CURRENT_TIMESTAMP']
+  const params: any = { id }
+
+  const set = (key: string, col: string) => {
+    if (patch[key as keyof typeof patch] === undefined) return
+    fields.push(`${col} = @${key}`)
+    params[key] = patch[key as keyof typeof patch]
+  }
+
+  set('status', 'status')
+  set('total_rows', 'total_rows')
+  set('processed_rows', 'processed_rows')
+  set('record_count', 'record_count')
+  set('failed_count', 'failed_count')
+  set('skipped_count', 'skipped_count')
+  set('file_size_bytes', 'file_size_bytes')
+  set('error_message', 'error_message')
+  set('finished_at', 'finished_at')
+
+  const stmt = db.prepare(`UPDATE import_history SET ${fields.join(', ')} WHERE id = @id`)
+  stmt.run(params)
+}
+
+export function rollbackImportExpenses(importId: number): number {
+  try {
+    const stmt = db.prepare('DELETE FROM expense_records WHERE import_id = ?')
+    const result = stmt.run(importId)
+    return result.changes
+  } catch (e) {
+    console.error('Failed to rollback import expenses:', e)
+    return 0
+  }
 }
 
 export function deleteImportRecord(id: number): boolean {

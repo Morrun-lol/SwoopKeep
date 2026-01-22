@@ -19,9 +19,12 @@ interface YearGoal {
 }
 
 export default function BudgetConfig() {
+  const [mode, setMode] = useState<'year' | 'month'>('year')
   const [goals, setGoals] = useState<YearGoal[]>([])
+  const [monthlyBudgets, setMonthlyBudgets] = useState<any[]>([])
   const [loading, setLoading] = useState(true)
   const [year, setYear] = useState(new Date().getFullYear())
+  const [month, setMonth] = useState(new Date().getMonth() + 1)
   const [isAdding, setIsAdding] = useState(false)
   const [structure, setStructure] = useState<{ project: string, category: string, sub_category: string }[]>([])
   
@@ -63,15 +66,31 @@ export default function BudgetConfig() {
     expense_type: '' // Default empty, user must select
   })
 
+  const [newMonthlyItem, setNewMonthlyItem] = useState<{
+    project: string
+    category: string
+    sub_category: string
+    budget_amount: number
+  }>({
+    project: '',
+    category: '',
+    sub_category: '',
+    budget_amount: 0,
+  })
+
   useEffect(() => {
     loadInitialData()
   }, [])
 
   useEffect(() => {
-    loadData()
+    if (mode === 'year') {
+      loadData()
+    } else {
+      loadMonthlyBudgets()
+    }
     loadStructure()
     loadExpenseTypes()
-  }, [year, selectedLedger])
+  }, [year, month, selectedLedger, mode])
 
   const loadInitialData = async () => {
     try {
@@ -116,6 +135,18 @@ export default function BudgetConfig() {
       const memberId = selectedLedger.type === 'member' && selectedLedger.id ? selectedLedger.id : undefined
       const data = await window.api.getYearGoals(year, memberId)
       setGoals(data)
+    } catch (error) {
+      console.error(error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const loadMonthlyBudgets = async () => {
+    setLoading(true)
+    try {
+      const data = await window.api.getMonthlyBudgets(year, month)
+      setMonthlyBudgets(Array.isArray(data) ? data : [])
     } catch (error) {
       console.error(error)
     } finally {
@@ -172,6 +203,55 @@ export default function BudgetConfig() {
     } catch (e) {
         console.error(e)
         alert('保存失败')
+    }
+  }
+
+  const handleSaveMonthly = async (item: any) => {
+    try {
+      const ok = await window.api.saveMonthlyBudget({
+        ...item,
+        year,
+        month,
+      })
+      if (!ok) throw new Error('save failed')
+      await loadMonthlyBudgets()
+    } catch (e) {
+      alert('保存失败')
+    }
+  }
+
+  const handleDeleteMonthly = async (id: number) => {
+    if (!confirm('确定要删除这个月度预算吗？')) return
+    setMonthlyBudgets(prev => prev.filter(item => item.id !== id))
+    try {
+      const ok = await window.api.deleteMonthlyBudget(id)
+      if (!ok) throw new Error('delete failed')
+      await loadMonthlyBudgets()
+    } catch (e) {
+      alert('删除失败')
+      loadMonthlyBudgets()
+    }
+  }
+
+  const handleAddNewMonthly = async () => {
+    if (!newMonthlyItem.category) {
+      alert('分类名称必填')
+      return
+    }
+
+    try {
+      const ok = await window.api.saveMonthlyBudget({
+        ...newMonthlyItem,
+        year,
+        month,
+      })
+      if (!ok) throw new Error('save failed')
+      setNewMonthlyItem({ project: '', category: '', sub_category: '', budget_amount: 0 })
+      setIsAdding(false)
+      await loadMonthlyBudgets()
+    } catch (e) {
+      console.error(e)
+      alert('保存失败')
     }
   }
 
@@ -257,13 +337,47 @@ export default function BudgetConfig() {
 
   const activeExpenseTypes = expenseTypes.filter(t => t.is_active)
 
+  const filteredMonthlyBudgets = useMemo(() => {
+    return monthlyBudgets.filter(b => {
+      const project = (b.project || '').toString()
+      const category = (b.category || '').toString()
+      const subCategory = (b.sub_category || '').toString()
+      const matchesSearch = searchQuery === '' ||
+        project.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        category.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        subCategory.toLowerCase().includes(searchQuery.toLowerCase())
+
+      const matchesProject = filterProject === '' || project === filterProject
+      return matchesSearch && matchesProject
+    })
+  }, [monthlyBudgets, searchQuery, filterProject])
+
   return (
     <div className="space-y-4 md:space-y-6 h-full flex flex-col pb-20 md:pb-0">
       {/* Header & Filters */}
       <div className="flex flex-col gap-4 bg-white p-4 rounded-xl border border-gray-200 shadow-sm">
         <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4">
-          <h1 className="text-xl md:text-2xl font-bold text-gray-900">预算目标配置</h1>
+          <h1 className="text-xl md:text-2xl font-bold text-gray-900">预算配置</h1>
           <div className="flex flex-wrap items-center gap-2 md:gap-3">
+            <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+              <button
+                onClick={() => { setMode('year'); setIsAdding(false) }}
+                className={`px-2 py-1 text-xs rounded-md transition-all ${
+                  mode === 'year' ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                年度目标
+              </button>
+              <button
+                onClick={() => { setMode('month'); setIsAdding(false) }}
+                className={`px-2 py-1 text-xs rounded-md transition-all ${
+                  mode === 'month' ? 'bg-white text-emerald-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                }`}
+              >
+                月度预算
+              </button>
+            </div>
+
             {/* Member Selector */}
             <div className="relative z-20">
                 <button
@@ -323,6 +437,20 @@ export default function BudgetConfig() {
                     className="w-12 md:w-16 font-bold text-gray-900 outline-none bg-transparent text-sm md:text-base"
                 />
             </div>
+
+            {mode === 'month' && (
+              <div className="flex items-center gap-2 bg-gray-50 px-2 md:px-3 py-1.5 rounded-lg border border-gray-200">
+                <span className="text-xs md:text-sm text-gray-500 whitespace-nowrap">月份</span>
+                <input
+                  type="number"
+                  min={1}
+                  max={12}
+                  value={month}
+                  onChange={(e) => setMonth(Number(e.target.value))}
+                  className="w-10 md:w-12 font-bold text-gray-900 outline-none bg-transparent text-sm md:text-base"
+                />
+              </div>
+            )}
             <button 
                 onClick={() => setIsTypeManagerOpen(true)}
                 className="flex items-center gap-1 md:gap-2 text-gray-600 hover:text-gray-900 px-2 md:px-3 py-1.5 md:py-2 rounded-lg hover:bg-gray-100 transition-colors text-xs md:text-sm"
@@ -332,12 +460,12 @@ export default function BudgetConfig() {
                 <span className="sm:hidden">类型</span>
             </button>
             <button 
-                onClick={() => setIsAdding(true)}
-                className="flex items-center gap-1 md:gap-2 bg-emerald-600 text-white px-3 md:px-4 py-1.5 md:py-2 rounded-lg hover:bg-emerald-700 transition-colors text-xs md:text-sm"
+              onClick={() => setIsAdding(true)}
+              className="flex items-center gap-1 md:gap-2 bg-emerald-600 text-white px-3 md:px-4 py-1.5 md:py-2 rounded-lg hover:bg-emerald-700 transition-colors text-xs md:text-sm"
             >
-                <Plus className="w-3 h-3 md:w-4 md:h-4" />
-                <span className="hidden sm:inline">新增分类目标</span>
-                <span className="sm:hidden">新增</span>
+              <Plus className="w-3 h-3 md:w-4 md:h-4" />
+              <span className="hidden sm:inline">{mode === 'month' ? '新增月度预算' : '新增分类目标'}</span>
+              <span className="sm:hidden">新增</span>
             </button>
           </div>
         </div>
@@ -354,30 +482,118 @@ export default function BudgetConfig() {
             </div>
             
             <div className="flex items-center gap-2">
-                <Filter className="w-4 h-4 text-gray-400" />
-                <select 
-                    className="border rounded-lg px-3 py-2 bg-white outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
-                    value={filterType}
-                    onChange={(e) => setFilterType(e.target.value)}
-                >
-                    <option value="">所有费用类型</option>
-                    {activeExpenseTypes.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
-                </select>
+              <Filter className="w-4 h-4 text-gray-400" />
 
+              {mode === 'year' && (
                 <select 
-                    className="border rounded-lg px-3 py-2 bg-white outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
-                    value={filterProject}
-                    onChange={(e) => setFilterProject(e.target.value)}
+                  className="border rounded-lg px-3 py-2 bg-white outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
+                  value={filterType}
+                  onChange={(e) => setFilterType(e.target.value)}
                 >
-                    <option value="">所有项目</option>
-                    {projectOptions.map(p => <option key={p} value={p}>{p}</option>)}
+                  <option value="">所有费用类型</option>
+                  {activeExpenseTypes.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
                 </select>
+              )}
+
+              <select 
+                className="border rounded-lg px-3 py-2 bg-white outline-none focus:ring-2 focus:ring-emerald-500 text-sm"
+                value={filterProject}
+                onChange={(e) => setFilterProject(e.target.value)}
+              >
+                <option value="">所有项目</option>
+                {projectOptions.map(p => <option key={p} value={p}>{p}</option>)}
+              </select>
             </div>
         </div>
       </div>
 
       {/* Add New Form */}
       {isAdding && (
+          mode === 'month' ? (
+            <div className="bg-white p-6 rounded-xl border border-emerald-200 shadow-md animate-in fade-in slide-in-from-top-2">
+              <h3 className="font-bold text-gray-900 mb-4 text-lg">新增月度预算</h3>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-4">
+                <div className="space-y-1">
+                  <label className="text-xs text-gray-500 font-medium">项目 (一级)</label>
+                  <select
+                    className="w-full border rounded-lg px-3 py-2 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                    value={newMonthlyItem.project}
+                    onChange={e => setNewMonthlyItem({ ...newMonthlyItem, project: e.target.value, category: '', sub_category: '' })}
+                  >
+                    <option value="">请选择项目</option>
+                    {projectOptions.map(p => <option key={p} value={p}>{p}</option>)}
+                    <option value="custom">+ 自定义输入</option>
+                  </select>
+                  {newMonthlyItem.project === 'custom' && (
+                    <input
+                      placeholder="输入新项目名称"
+                      className="w-full mt-2 border rounded-lg px-3 py-2"
+                      onBlur={e => setNewMonthlyItem({ ...newMonthlyItem, project: e.target.value })}
+                    />
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs text-gray-500 font-medium">分类 (二级) <span className="text-red-500">*</span></label>
+                  <select
+                    className="w-full border rounded-lg px-3 py-2 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                    value={newMonthlyItem.category}
+                    onChange={e => setNewMonthlyItem({ ...newMonthlyItem, category: e.target.value, sub_category: '' })}
+                  >
+                    <option value="">请选择分类</option>
+                    {categoryOptions.map(c => <option key={c} value={c}>{c}</option>)}
+                    <option value="custom">+ 自定义输入</option>
+                  </select>
+                  {newMonthlyItem.category === 'custom' && (
+                    <input
+                      placeholder="输入新分类名称"
+                      className="w-full mt-2 border rounded-lg px-3 py-2"
+                      onBlur={e => setNewMonthlyItem({ ...newMonthlyItem, category: e.target.value })}
+                    />
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs text-gray-500 font-medium">子分类 (三级)</label>
+                  <select
+                    className="w-full border rounded-lg px-3 py-2 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                    value={newMonthlyItem.sub_category}
+                    onChange={e => setNewMonthlyItem({ ...newMonthlyItem, sub_category: e.target.value })}
+                  >
+                    <option value="">请选择子分类</option>
+                    {subCategoryOptions.map(s => <option key={s} value={s}>{s}</option>)}
+                    <option value="custom">+ 自定义输入</option>
+                  </select>
+                  {newMonthlyItem.sub_category === 'custom' && (
+                    <input
+                      placeholder="输入新子分类名称"
+                      className="w-full mt-2 border rounded-lg px-3 py-2"
+                      onBlur={e => setNewMonthlyItem({ ...newMonthlyItem, sub_category: e.target.value })}
+                    />
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs text-gray-500 font-medium">月度预算金额</label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-2 text-gray-400">¥</span>
+                    <input
+                      type="number"
+                      placeholder="0.00"
+                      className="w-full border rounded-lg pl-7 pr-3 py-2 bg-gray-50 focus:bg-white focus:ring-2 focus:ring-emerald-500 outline-none"
+                      value={newMonthlyItem.budget_amount || ''}
+                      onChange={e => setNewMonthlyItem({ ...newMonthlyItem, budget_amount: Number(e.target.value) })}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-3 pt-2 border-t">
+                <button onClick={() => setIsAdding(false)} className="px-6 py-2 border rounded-lg hover:bg-gray-50 font-medium transition-colors">取消</button>
+                <button onClick={handleAddNewMonthly} className="px-6 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium transition-colors">保存配置</button>
+              </div>
+            </div>
+          ) : (
           <div className="bg-white p-6 rounded-xl border border-emerald-200 shadow-md animate-in fade-in slide-in-from-top-2">
               <h3 className="font-bold text-gray-900 mb-4 text-lg">新增预算目标</h3>
               <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-4">
@@ -472,259 +688,400 @@ export default function BudgetConfig() {
                   <button onClick={handleAddNew} className="px-6 py-2 bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 font-medium transition-colors">保存配置</button>
               </div>
           </div>
+          )
       )}
 
       {/* Table */}
       <div className="flex-1 bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden flex flex-col">
-        {/* Mobile View: Cards */}
-        <div className="md:hidden flex-1 overflow-y-auto p-4 space-y-3">
-             {paginatedGoals.length === 0 ? (
-                <div className="h-full flex flex-col items-center justify-center text-gray-500 py-12">
-                    <p className="mb-2">暂无配置</p>
-                    <button 
-                        onClick={() => setIsAdding(true)}
-                        className="text-emerald-600 font-medium"
-                    >
-                        点击新增
-                    </button>
-                </div>
-             ) : (
-                 paginatedGoals.map((item) => (
-                    <div key={item.id} className="bg-gray-50 rounded-lg p-3 border border-gray-100 shadow-sm relative">
-                        <div className="flex justify-between items-start mb-2">
-                            <div>
-                                <span className="text-xs font-medium px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 mr-2">
-                                    {item.expense_type}
-                                </span>
-                                <h3 className="text-sm font-bold text-gray-900 inline-block">
-                                    {item.project || '无项目'} - {item.category || '无分类'}
-                                </h3>
-                            </div>
-                            <button 
-                                onClick={() => handleDelete(item.id)}
-                                className="text-gray-400 hover:text-red-500 p-1"
-                            >
-                                <Trash2 className="w-4 h-4" />
-                            </button>
-                        </div>
-                        <div className="flex justify-between items-end">
-                            <div className="text-xs text-gray-500">
-                                {item.sub_category && <span>子分类: {item.sub_category}</span>}
-                            </div>
-                            <div className="text-right">
-                                <div className="text-xs text-gray-400">目标金额</div>
-                                <div className="text-base font-bold text-gray-900">¥{item.goal_amount.toLocaleString()}</div>
-                            </div>
-                        </div>
+        {mode === 'year' ? (
+          <>
+            {/* Mobile View: Cards */}
+            <div className="md:hidden flex-1 overflow-y-auto p-4 space-y-3">
+                 {paginatedGoals.length === 0 ? (
+                    <div className="h-full flex flex-col items-center justify-center text-gray-500 py-12">
+                        <p className="mb-2">暂无配置</p>
+                        <button 
+                            onClick={() => setIsAdding(true)}
+                            className="text-emerald-600 font-medium"
+                        >
+                            点击新增
+                        </button>
                     </div>
-                 ))
-             )}
-        </div>
-
-        <div className="hidden md:block flex-1 overflow-auto">
-            <table className="w-full text-sm text-left whitespace-nowrap">
-                <thead className="bg-gray-50 text-gray-500 font-medium border-b border-gray-200 sticky top-0">
-                    <tr>
-                        {[
-                            { label: '费用类型', key: 'expense_type' },
-                            { label: '项目 (一级)', key: 'project' },
-                            { label: '分类 (二级)', key: 'category' },
-                            { label: '子分类 (三级)', key: 'sub_category' },
-                            { label: '年度预算', key: 'goal_amount', align: 'right' }
-                        ].map((col) => (
-                            <th 
-                                key={col.key} 
-                                className={`px-6 py-3 cursor-pointer hover:bg-gray-100 transition-colors ${col.align === 'right' ? 'text-right' : ''}`}
-                                onClick={() => handleSort(col.key as keyof YearGoal)}
-                            >
-                                <div className={`flex items-center gap-1 ${col.align === 'right' ? 'justify-end' : ''}`}>
-                                    {col.label}
-                                    {sortField === col.key ? (
-                                        sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
-                                    ) : <ArrowUpDown className="w-3 h-3 opacity-30" />}
+                 ) : (
+                     paginatedGoals.map((item) => (
+                        <div key={item.id} className="bg-gray-50 rounded-lg p-3 border border-gray-100 shadow-sm relative">
+                            <div className="flex justify-between items-start mb-2">
+                                <div>
+                                    <span className="text-xs font-medium px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 mr-2">
+                                        {item.expense_type}
+                                    </span>
+                                    <h3 className="text-sm font-bold text-gray-900 inline-block">
+                                        {item.project || '无项目'} - {item.category || '无分类'}
+                                    </h3>
                                 </div>
-                            </th>
-                        ))}
-                        <th className="px-6 py-3 text-right">操作</th>
-                    </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                    {paginatedGoals.length === 0 ? (
+                                <button 
+                                    onClick={() => handleDelete(item.id)}
+                                    className="text-gray-400 hover:text-red-500 p-1"
+                                >
+                                    <Trash2 className="w-4 h-4" />
+                                </button>
+                            </div>
+                            <div className="flex justify-between items-end">
+                                <div className="text-xs text-gray-500">
+                                    {item.sub_category && <span>子分类: {item.sub_category}</span>}
+                                </div>
+                                <div className="text-right">
+                                    <div className="text-xs text-gray-400">目标金额</div>
+                                    <div className="text-base font-bold text-gray-900">¥{item.goal_amount.toLocaleString()}</div>
+                                </div>
+                            </div>
+                        </div>
+                     ))
+                 )}
+            </div>
+
+            <div className="hidden md:block flex-1 overflow-auto">
+                <table className="w-full text-sm text-left whitespace-nowrap">
+                    <thead className="bg-gray-50 text-gray-500 font-medium border-b border-gray-200 sticky top-0">
                         <tr>
-                            <td colSpan={6} className="px-6 py-12 text-center text-gray-400">
-                                {searchQuery ? '未找到匹配的记录' : '暂无配置，请点击右上角新增'}
-                            </td>
+                            {[
+                                { label: '费用类型', key: 'expense_type' },
+                                { label: '项目 (一级)', key: 'project' },
+                                { label: '分类 (二级)', key: 'category' },
+                                { label: '子分类 (三级)', key: 'sub_category' },
+                                { label: '年度预算', key: 'goal_amount', align: 'right' }
+                            ].map((col) => (
+                                <th 
+                                    key={col.key} 
+                                    className={`px-6 py-3 cursor-pointer hover:bg-gray-100 transition-colors ${col.align === 'right' ? 'text-right' : ''}`}
+                                    onClick={() => handleSort(col.key as keyof YearGoal)}
+                                >
+                                    <div className={`flex items-center gap-1 ${col.align === 'right' ? 'justify-end' : ''}`}>
+                                        {col.label}
+                                        {sortField === col.key ? (
+                                            sortDirection === 'asc' ? <ArrowUp className="w-3 h-3" /> : <ArrowDown className="w-3 h-3" />
+                                        ) : <ArrowUpDown className="w-3 h-3 opacity-30" />}
+                                    </div>
+                                </th>
+                            ))}
+                            <th className="px-6 py-3 text-right">操作</th>
                         </tr>
-                    ) : (
-                        paginatedGoals.map((item, idx) => (
-                            <tr key={item.id || idx} className="hover:bg-gray-50 group">
-                                <td className="px-6 py-3">
-                                    <select
-                                        className={`w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-emerald-500 outline-none transition-colors text-xs font-medium py-1 ${
-                                            item.expense_type?.includes('固定') 
-                                            ? 'text-blue-800' 
-                                            : 'text-emerald-800'
-                                        }`}
-                                        value={item.expense_type || ''}
-                                        onChange={(e) => {
-                                            const newVal = e.target.value;
-                                            setGoals(prev => prev.map(g => g.id === item.id ? { ...g, expense_type: newVal } : g))
-                                            handleSave({...item, expense_type: newVal})
-                                        }}
-                                    >
-                                        <option value="">请选择</option>
-                                        {activeExpenseTypes.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
-                                    </select>
-                                </td>
-                                <td className="px-6 py-3">
-                                    <input 
-                                        className="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-emerald-500 outline-none transition-colors text-gray-900"
-                                        value={item.project || ''}
-                                        onChange={(e) => {
-                                            const newVal = e.target.value;
-                                            setGoals(prev => prev.map(g => g.id === item.id ? { ...g, project: newVal } : g))
-                                        }}
-                                        onBlur={(e) => handleSave({...item, project: e.target.value})}
-                                        onKeyDown={(e) => {
-                                            if(e.key === 'Enter') e.currentTarget.blur()
-                                        }}
-                                    />
-                                </td>
-                                <td className="px-6 py-3">
-                                    <input 
-                                        className="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-emerald-500 outline-none transition-colors font-medium text-gray-900"
-                                        value={item.category || ''}
-                                        onChange={(e) => {
-                                            const newVal = e.target.value;
-                                            setGoals(prev => prev.map(g => g.id === item.id ? { ...g, category: newVal } : g))
-                                        }}
-                                        onBlur={(e) => handleSave({...item, category: e.target.value})}
-                                        onKeyDown={(e) => {
-                                            if(e.key === 'Enter') e.currentTarget.blur()
-                                        }}
-                                    />
-                                </td>
-                                <td className="px-6 py-3">
-                                    <input 
-                                        className="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-emerald-500 outline-none transition-colors text-gray-500"
-                                        value={item.sub_category || ''}
-                                        onChange={(e) => {
-                                            const newVal = e.target.value;
-                                            setGoals(prev => prev.map(g => g.id === item.id ? { ...g, sub_category: newVal } : g))
-                                        }}
-                                        onBlur={(e) => handleSave({...item, sub_category: e.target.value})}
-                                        onKeyDown={(e) => {
-                                            if(e.key === 'Enter') e.currentTarget.blur()
-                                        }}
-                                    />
-                                </td>
-                                <td className="px-6 py-3 text-right">
-                                    <input 
-                                        type="number" 
-                                        className="w-32 text-right bg-transparent border-b border-transparent hover:border-gray-300 focus:border-emerald-500 outline-none transition-colors font-mono"
-                                        value={item.goal_amount}
-                                        onChange={(e) => {
-                                            const newVal = e.target.value;
-                                            setGoals(prev => prev.map(g => g.id === item.id ? { ...g, goal_amount: Number(newVal) } : g))
-                                        }}
-                                        onBlur={(e) => handleSave({...item, goal_amount: Number(e.target.value)})}
-                                        onKeyDown={(e) => {
-                                            if(e.key === 'Enter') {
-                                                e.currentTarget.blur()
-                                            }
-                                        }}
-                                    />
-                                </td>
-                                <td className="px-6 py-3 text-right">
-                                    <button 
-                                        onClick={() => handleDelete(item.id)}
-                                        className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
-                                    >
-                                        <Trash2 className="w-4 h-4" />
-                                    </button>
+                    </thead>
+                    <tbody className="divide-y divide-gray-100">
+                        {paginatedGoals.length === 0 ? (
+                            <tr>
+                                <td colSpan={6} className="px-6 py-12 text-center text-gray-400">
+                                    {searchQuery ? '未找到匹配的记录' : '暂无配置，请点击右上角新增'}
                                 </td>
                             </tr>
-                        ))
-                    )}
-                </tbody>
-            </table>
-        </div>
-        
-        {/* Pagination & Summary */}
-        <div className="bg-gray-50 px-4 md:px-6 py-4 border-t border-gray-200 flex flex-col md:flex-row justify-between items-center gap-4">
-            <div className="text-xs text-gray-500 whitespace-nowrap order-2 md:order-1">
-                共 {sortedGoals.length} 条记录，当前显示 {paginatedGoals.length} 条
+                        ) : (
+                            paginatedGoals.map((item, idx) => (
+                                <tr key={item.id || idx} className="hover:bg-gray-50 group">
+                                    <td className="px-6 py-3">
+                                        <select
+                                            className={`w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-emerald-500 outline-none transition-colors text-xs font-medium py-1 ${
+                                                item.expense_type?.includes('固定') 
+                                                ? 'text-blue-800' 
+                                                : 'text-emerald-800'
+                                            }`}
+                                            value={item.expense_type || ''}
+                                            onChange={(e) => {
+                                                const newVal = e.target.value;
+                                                setGoals(prev => prev.map(g => g.id === item.id ? { ...g, expense_type: newVal } : g))
+                                                handleSave({...item, expense_type: newVal})
+                                            }}
+                                        >
+                                            <option value="">请选择</option>
+                                            {activeExpenseTypes.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
+                                        </select>
+                                    </td>
+                                    <td className="px-6 py-3">
+                                        <input 
+                                            className="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-emerald-500 outline-none transition-colors text-gray-900"
+                                            value={item.project || ''}
+                                            onChange={(e) => {
+                                                const newVal = e.target.value;
+                                                setGoals(prev => prev.map(g => g.id === item.id ? { ...g, project: newVal } : g))
+                                            }}
+                                            onBlur={(e) => handleSave({...item, project: e.target.value})}
+                                            onKeyDown={(e) => {
+                                                if(e.key === 'Enter') e.currentTarget.blur()
+                                            }}
+                                        />
+                                    </td>
+                                    <td className="px-6 py-3">
+                                        <input 
+                                            className="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-emerald-500 outline-none transition-colors font-medium text-gray-900"
+                                            value={item.category || ''}
+                                            onChange={(e) => {
+                                                const newVal = e.target.value;
+                                                setGoals(prev => prev.map(g => g.id === item.id ? { ...g, category: newVal } : g))
+                                            }}
+                                            onBlur={(e) => handleSave({...item, category: e.target.value})}
+                                            onKeyDown={(e) => {
+                                                if(e.key === 'Enter') e.currentTarget.blur()
+                                            }}
+                                        />
+                                    </td>
+                                    <td className="px-6 py-3">
+                                        <input 
+                                            className="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-emerald-500 outline-none transition-colors text-gray-500"
+                                            value={item.sub_category || ''}
+                                            onChange={(e) => {
+                                                const newVal = e.target.value;
+                                                setGoals(prev => prev.map(g => g.id === item.id ? { ...g, sub_category: newVal } : g))
+                                            }}
+                                            onBlur={(e) => handleSave({...item, sub_category: e.target.value})}
+                                            onKeyDown={(e) => {
+                                                if(e.key === 'Enter') e.currentTarget.blur()
+                                            }}
+                                        />
+                                    </td>
+                                    <td className="px-6 py-3 text-right">
+                                        <input 
+                                            type="number" 
+                                            className="w-32 text-right bg-transparent border-b border-transparent hover:border-gray-300 focus:border-emerald-500 outline-none transition-colors font-mono"
+                                            value={item.goal_amount}
+                                            onChange={(e) => {
+                                                const newVal = e.target.value;
+                                                setGoals(prev => prev.map(g => g.id === item.id ? { ...g, goal_amount: Number(newVal) } : g))
+                                            }}
+                                            onBlur={(e) => handleSave({...item, goal_amount: Number(e.target.value)})}
+                                            onKeyDown={(e) => {
+                                                if(e.key === 'Enter') {
+                                                    e.currentTarget.blur()
+                                                }
+                                            }}
+                                        />
+                                    </td>
+                                    <td className="px-6 py-3 text-right">
+                                        <button 
+                                            onClick={() => handleDelete(item.id)}
+                                            className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                                        >
+                                            <Trash2 className="w-4 h-4" />
+                                        </button>
+                                    </td>
+                                </tr>
+                            ))
+                        )}
+                    </tbody>
+                </table>
             </div>
-            <div className="flex flex-wrap items-center gap-3 justify-center order-1 md:order-2 w-full md:w-auto">
-                <select 
-                    value={pageSize}
-                    onChange={(e) => {
-                        setPageSize(Number(e.target.value))
-                        setCurrentPage(1)
-                    }}
-                    className="h-10 border rounded-lg px-3 text-xs bg-white outline-none focus:ring-2 focus:ring-emerald-500 min-w-[100px]"
-                >
-                    <option value="10">10 条/页</option>
-                    <option value="20">20 条/页</option>
-                    <option value="50">50 条/页</option>
-                    <option value="100">100 条/页</option>
-                </select>
+            
+            {/* Pagination & Summary */}
+            <div className="bg-gray-50 px-4 md:px-6 py-4 border-t border-gray-200 flex flex-col md:flex-row justify-between items-center gap-4">
+                <div className="text-xs text-gray-500 whitespace-nowrap order-2 md:order-1">
+                    共 {sortedGoals.length} 条记录，当前显示 {paginatedGoals.length} 条
+                </div>
+                <div className="flex flex-wrap items-center gap-3 justify-center order-1 md:order-2 w-full md:w-auto">
+                    <select 
+                        value={pageSize}
+                        onChange={(e) => {
+                            setPageSize(Number(e.target.value))
+                            setCurrentPage(1)
+                        }}
+                        className="h-10 border rounded-lg px-3 text-xs bg-white outline-none focus:ring-2 focus:ring-emerald-500 min-w-[100px]"
+                    >
+                        <option value="10">10 条/页</option>
+                        <option value="20">20 条/页</option>
+                        <option value="50">50 条/页</option>
+                        <option value="100">100 条/页</option>
+                    </select>
 
-                <div className="flex items-center gap-2">
-                    <button 
-                        onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
-                        disabled={currentPage === 1}
-                        className="w-10 h-10 flex items-center justify-center rounded-lg border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    >
-                        <ChevronLeft className="w-4 h-4" />
-                    </button>
-                    <span className="text-xs font-medium text-gray-700 whitespace-nowrap min-w-[40px] text-center">
-                        {currentPage} / {totalPages || 1}
-                    </span>
-                    <button 
-                        onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
-                        disabled={currentPage === totalPages || totalPages === 0}
-                        className="w-10 h-10 flex items-center justify-center rounded-lg border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-                    >
-                        <ChevronRight className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-2">
+                        <button 
+                            onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                            disabled={currentPage === 1}
+                            className="w-10 h-10 flex items-center justify-center rounded-lg border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                            <ChevronLeft className="w-4 h-4" />
+                        </button>
+                        <span className="text-xs font-medium text-gray-700 whitespace-nowrap min-w-[40px] text-center">
+                            {currentPage} / {totalPages || 1}
+                        </span>
+                        <button 
+                            onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                            disabled={currentPage === totalPages || totalPages === 0}
+                            className="w-10 h-10 flex items-center justify-center rounded-lg border border-gray-200 bg-white hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                        >
+                            <ChevronRight className="w-4 h-4" />
+                        </button>
+                    </div>
                 </div>
             </div>
-        </div>
+          </>
+        ) : (
+          <>
+            <div className="md:hidden flex-1 overflow-y-auto p-4 space-y-3">
+              {filteredMonthlyBudgets.length === 0 ? (
+                <div className="h-full flex flex-col items-center justify-center text-gray-500 py-12">
+                  <p className="mb-2">暂无配置</p>
+                  <button onClick={() => setIsAdding(true)} className="text-emerald-600 font-medium">点击新增</button>
+                </div>
+              ) : (
+                filteredMonthlyBudgets.map((item) => (
+                  <div key={item.id} className="bg-gray-50 rounded-lg p-3 border border-gray-100 shadow-sm relative">
+                    <div className="flex justify-between items-start mb-2">
+                      <div>
+                        <h3 className="text-sm font-bold text-gray-900">
+                          {(item.project || '无项目')} - {(item.category || '无分类')}
+                        </h3>
+                        {item.sub_category && <div className="text-xs text-gray-500 mt-1">子分类: {item.sub_category}</div>}
+                      </div>
+                      <button onClick={() => handleDeleteMonthly(item.id)} className="text-gray-400 hover:text-red-500 p-1">
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                    <div className="flex justify-between items-end">
+                      <div className="text-xs text-gray-500">月度预算</div>
+                      <input
+                        type="number"
+                        className="w-32 text-right bg-white border rounded px-2 py-1 font-mono"
+                        value={Number(item.budget_amount ?? 0)}
+                        onChange={(e) => {
+                          const newVal = Number(e.target.value)
+                          setMonthlyBudgets(prev => prev.map(b => b.id === item.id ? { ...b, budget_amount: newVal } : b))
+                        }}
+                        onBlur={() => handleSaveMonthly(item)}
+                      />
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+
+            <div className="hidden md:block flex-1 overflow-auto">
+              <table className="w-full text-sm text-left whitespace-nowrap">
+                <thead className="bg-gray-50 text-gray-500 font-medium border-b border-gray-200 sticky top-0">
+                  <tr>
+                    <th className="px-6 py-3">项目 (一级)</th>
+                    <th className="px-6 py-3">分类 (二级)</th>
+                    <th className="px-6 py-3">子分类 (三级)</th>
+                    <th className="px-6 py-3 text-right">月度预算</th>
+                    <th className="px-6 py-3 text-right">操作</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filteredMonthlyBudgets.length === 0 ? (
+                    <tr>
+                      <td colSpan={5} className="px-6 py-12 text-center text-gray-400">
+                        {searchQuery ? '未找到匹配的记录' : '暂无配置，请点击右上角新增'}
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredMonthlyBudgets.map((item, idx) => (
+                      <tr key={item.id || idx} className="hover:bg-gray-50 group">
+                        <td className="px-6 py-3">
+                          <input
+                            className="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-emerald-500 outline-none transition-colors text-gray-900"
+                            value={item.project || ''}
+                            onChange={(e) => {
+                              const newVal = e.target.value
+                              setMonthlyBudgets(prev => prev.map(b => b.id === item.id ? { ...b, project: newVal } : b))
+                            }}
+                            onBlur={(e) => handleSaveMonthly({ ...item, project: e.target.value })}
+                            onKeyDown={(e) => { if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur() }}
+                          />
+                        </td>
+                        <td className="px-6 py-3">
+                          <input
+                            className="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-emerald-500 outline-none transition-colors font-medium text-gray-900"
+                            value={item.category || ''}
+                            onChange={(e) => {
+                              const newVal = e.target.value
+                              setMonthlyBudgets(prev => prev.map(b => b.id === item.id ? { ...b, category: newVal } : b))
+                            }}
+                            onBlur={(e) => handleSaveMonthly({ ...item, category: e.target.value })}
+                            onKeyDown={(e) => { if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur() }}
+                          />
+                        </td>
+                        <td className="px-6 py-3">
+                          <input
+                            className="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-emerald-500 outline-none transition-colors text-gray-500"
+                            value={item.sub_category || ''}
+                            onChange={(e) => {
+                              const newVal = e.target.value
+                              setMonthlyBudgets(prev => prev.map(b => b.id === item.id ? { ...b, sub_category: newVal } : b))
+                            }}
+                            onBlur={(e) => handleSaveMonthly({ ...item, sub_category: e.target.value })}
+                            onKeyDown={(e) => { if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur() }}
+                          />
+                        </td>
+                        <td className="px-6 py-3 text-right">
+                          <input
+                            type="number"
+                            className="w-32 text-right bg-transparent border-b border-transparent hover:border-gray-300 focus:border-emerald-500 outline-none transition-colors font-mono"
+                            value={Number(item.budget_amount ?? 0)}
+                            onChange={(e) => {
+                              const newVal = Number(e.target.value)
+                              setMonthlyBudgets(prev => prev.map(b => b.id === item.id ? { ...b, budget_amount: newVal } : b))
+                            }}
+                            onBlur={(e) => handleSaveMonthly({ ...item, budget_amount: Number(e.target.value) })}
+                            onKeyDown={(e) => { if (e.key === 'Enter') (e.currentTarget as HTMLInputElement).blur() }}
+                          />
+                        </td>
+                        <td className="px-6 py-3 text-right">
+                          <button
+                            onClick={() => handleDeleteMonthly(item.id)}
+                            className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="bg-gray-50 px-4 md:px-6 py-4 border-t border-gray-200 flex justify-between items-center gap-4">
+              <div className="text-xs text-gray-500 whitespace-nowrap">
+                共 {filteredMonthlyBudgets.length} 条记录
+              </div>
+              <div className="text-xs text-gray-400 whitespace-nowrap">
+                修改后移出输入框自动保存
+              </div>
+            </div>
+          </>
+        )}
       </div>
       
       {/* Import & Footer */}
-      <div className="bg-blue-50 p-4 md:p-6 rounded-xl text-blue-800 text-sm flex-shrink-0">
-          <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-6">
-            <div className="flex-1">
-                <p className="flex items-center gap-2 font-bold text-base mb-2">
-                    <Upload className="w-5 h-5" /> 
-                    批量导入预算
-                </p>
-                <p className="text-xs md:text-sm text-blue-700/80 leading-relaxed max-w-2xl">
-                    您可以上传包含预算目标的 Excel 文件。请先下载标准模板，按格式填写后上传。
-                    <br className="hidden md:block" />
-                    支持格式：.xlsx, .xls
-                </p>
+      {mode === 'year' && (
+        <div className="bg-blue-50 p-4 md:p-6 rounded-xl text-blue-800 text-sm flex-shrink-0">
+            <div className="flex flex-col lg:flex-row lg:justify-between lg:items-center gap-6">
+              <div className="flex-1">
+                  <p className="flex items-center gap-2 font-bold text-base mb-2">
+                      <Upload className="w-5 h-5" /> 
+                      批量导入预算
+                  </p>
+                  <p className="text-xs md:text-sm text-blue-700/80 leading-relaxed max-w-2xl">
+                      您可以上传包含预算目标的 Excel 文件。请先下载标准模板，按格式填写后上传。
+                      <br className="hidden md:block" />
+                      支持格式：.xlsx, .xls
+                  </p>
+              </div>
+              <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
+                  <button 
+                      onClick={() => window.api.downloadBudgetTemplate()}
+                      className="h-12 px-6 bg-white border border-blue-200 text-blue-700 rounded-xl hover:bg-blue-50 transition-all text-xs md:text-sm font-bold flex items-center justify-center gap-2 shadow-sm whitespace-nowrap active:scale-[0.98]"
+                  >
+                      <Download className="w-4 h-4" />
+                      下载模板
+                  </button>
+                  <button 
+                      onClick={handleImport}
+                      className="h-12 px-6 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all text-xs md:text-sm font-bold flex items-center justify-center gap-2 shadow-md shadow-blue-200 whitespace-nowrap active:scale-[0.98]"
+                  >
+                      <Upload className="w-4 h-4" />
+                      上传 Excel
+                  </button>
+              </div>
             </div>
-            <div className="flex flex-col sm:flex-row gap-3 w-full lg:w-auto">
-                <button 
-                    onClick={() => window.api.downloadBudgetTemplate()}
-                    className="h-12 px-6 bg-white border border-blue-200 text-blue-700 rounded-xl hover:bg-blue-50 transition-all text-xs md:text-sm font-bold flex items-center justify-center gap-2 shadow-sm whitespace-nowrap active:scale-[0.98]"
-                >
-                    <Download className="w-4 h-4" />
-                    下载模板
-                </button>
-                <button 
-                    onClick={handleImport}
-                    className="h-12 px-6 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all text-xs md:text-sm font-bold flex items-center justify-center gap-2 shadow-md shadow-blue-200 whitespace-nowrap active:scale-[0.98]"
-                >
-                    <Upload className="w-4 h-4" />
-                    上传 Excel
-                </button>
-            </div>
-          </div>
-      </div>
+        </div>
+      )}
 
       <ExpenseTypeManager 
         isOpen={isTypeManagerOpen}
