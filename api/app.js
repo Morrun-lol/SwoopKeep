@@ -53,6 +53,36 @@ const parseExpenseCache = new Map()
 
 const normalizeParseKey = (s) => String(s || '').trim().replace(/\s+/g, ' ').slice(0, 500)
 
+const isWavBuffer = (buf) => {
+  if (!Buffer.isBuffer(buf) || buf.length < 12) return false
+  return buf.subarray(0, 4).toString('ascii') === 'RIFF' && buf.subarray(8, 12).toString('ascii') === 'WAVE'
+}
+
+const pcm16ToWav = (pcmBuf, sampleRate, channels) => {
+  const sr = Number(sampleRate) || 16000
+  const ch = Number(channels) || 1
+  const bitsPerSample = 16
+  const byteRate = sr * ch * (bitsPerSample / 8)
+  const blockAlign = ch * (bitsPerSample / 8)
+  const dataSize = pcmBuf.length
+
+  const header = Buffer.alloc(44)
+  header.write('RIFF', 0)
+  header.writeUInt32LE(36 + dataSize, 4)
+  header.write('WAVE', 8)
+  header.write('fmt ', 12)
+  header.writeUInt32LE(16, 16)
+  header.writeUInt16LE(1, 20)
+  header.writeUInt16LE(ch, 22)
+  header.writeUInt32LE(sr, 24)
+  header.writeUInt32LE(byteRate, 28)
+  header.writeUInt16LE(blockAlign, 32)
+  header.writeUInt16LE(bitsPerSample, 34)
+  header.write('data', 36)
+  header.writeUInt32LE(dataSize, 40)
+  return Buffer.concat([header, pcmBuf])
+}
+
 const stableHash = (obj) => {
   try {
     const json = JSON.stringify(obj)
@@ -321,9 +351,21 @@ app.post('/api/ai/transcribe', async (req, res) => {
     baseURL: process.env.OPENAI_BASE_URL || undefined,
   })
 
+  const startedAt = Date.now()
   const tmpPath = path.join(os.tmpdir(), `trae-audio-${crypto.randomUUID()}-${fileName}`)
   try {
-    const buffer = Buffer.from(audioBase64, 'base64')
+    let buffer = Buffer.from(audioBase64, 'base64')
+
+    const maxBytes = Number(process.env.TRANSCRIBE_MAX_AUDIO_BYTES || 0) || 4 * 1024 * 1024
+    if (buffer.length > maxBytes) {
+      res.status(413).json({ success: false, error: `音频过长（${buffer.length} bytes），请缩短录音后重试` })
+      return
+    }
+
+    if (!isWavBuffer(buffer)) {
+      buffer = pcm16ToWav(buffer, 16000, 1)
+    }
+
     fs.writeFileSync(tmpPath, buffer)
 
     const result = await client.audio.transcriptions.create({
@@ -333,8 +375,9 @@ app.post('/api/ai/transcribe', async (req, res) => {
     })
 
     res.status(200).json({ success: true, text: result.text })
-  } catch {
-    res.status(500).json({ success: false, error: 'Failed to transcribe audio' })
+  } catch (e) {
+    const msg = (e && e.message) ? String(e.message) : 'Failed to transcribe audio'
+    res.status(500).json({ success: false, error: msg, ms: Date.now() - startedAt })
   } finally {
     try {
       fs.unlinkSync(tmpPath)

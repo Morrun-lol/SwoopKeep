@@ -10,7 +10,8 @@ const getApiBaseUrl = () => {
   const cfg = loadRuntimeConfig()
   const raw = ((cfg.apiBaseUrl || '') || (import.meta.env.VITE_API_BASE_URL || '')).trim()
   const loc = typeof window !== 'undefined' ? window.location : null
-  const guessed = loc ? `${loc.protocol}//${loc.hostname}:3001` : ''
+  const isLocalHost = !!loc && (loc.hostname === 'localhost' || loc.hostname === '127.0.0.1')
+  const guessed = loc ? (isLocalHost ? `${loc.protocol}//${loc.hostname}:3001` : loc.origin) : ''
 
   let resolved = raw || guessed
   try {
@@ -133,7 +134,7 @@ export class SupabaseApi implements ExpenseApi {
             language: 'zh',
           }),
         },
-        30000,
+        60000,
       )
 
       if (!res.ok) {
@@ -181,7 +182,7 @@ export class SupabaseApi implements ExpenseApi {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text, context: { hierarchy, members: memberNames } }),
         },
-        20000,
+        60000,
       )
 
       if (!res.ok) {

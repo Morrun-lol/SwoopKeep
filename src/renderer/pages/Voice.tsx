@@ -36,6 +36,15 @@ export default function Voice() {
   const [showCategorySelector, setShowCategorySelector] = useState(false)
   const [inputType, setInputType] = useState<'voice' | 'image'>('voice')
 
+  const TRANSCRIBE_TIMEOUT_MS = 60000
+  const PARSE_TIMEOUT_MS = 60000
+  const MAX_RECORD_SECONDS = 8
+
+  const isRecordingRef = useRef(false)
+  const stopRecordingRef = useRef<() => Promise<void>>(async () => {})
+  const recordedSamplesRef = useRef(0)
+  const autoStopTriggeredRef = useRef(false)
+
   // Connection Test State
   const [testStatus, setTestStatus] = useState<'idle' | 'testing' | 'success' | 'error'>('idle')
   const [testLogs, setTestLogs] = useState<string[]>([])
@@ -57,6 +66,10 @@ export default function Voice() {
           setFamilies(familiesData)
       }).catch(console.error)
   }, [])
+
+  useEffect(() => {
+    isRecordingRef.current = isRecording
+  }, [isRecording])
   
   // 讯飞 WebSocket 相关引用
   const socketRef = useRef<WebSocket | null>(null)
@@ -234,6 +247,7 @@ export default function Voice() {
       const AudioContext = window.AudioContext || (window as any).webkitAudioContext
       const audioContext = new AudioContext({ sampleRate: 16000 }) // Try to request 16k
       audioContextRef.current = audioContext
+      const inputSampleRate = audioContext.sampleRate
       
       const source = audioContext.createMediaStreamSource(mediaStream)
       // Buffer size 4096 is safe.
@@ -241,6 +255,9 @@ export default function Voice() {
       scriptProcessorRef.current = processor
       
       const audioDataQueue: Float32Array[] = []
+
+      recordedSamplesRef.current = 0
+      autoStopTriggeredRef.current = false
       
       processor.onaudioprocess = (e) => {
           // Careful: state `isRecording` might be stale in closure if not using ref.
@@ -248,6 +265,15 @@ export default function Voice() {
           const inputData = e.inputBuffer.getChannelData(0)
           // Clone data! inputBuffer is reused.
           audioDataQueue.push(new Float32Array(inputData))
+
+          recordedSamplesRef.current += inputData.length
+          const limitSamples = MAX_RECORD_SECONDS * inputSampleRate
+          if (!window.electron && !autoStopTriggeredRef.current && recordedSamplesRef.current >= limitSamples) {
+            autoStopTriggeredRef.current = true
+            setTimeout(() => {
+              stopRecordingRef.current().catch(() => {})
+            }, 0)
+          }
       }
       
       source.connect(processor)
@@ -267,8 +293,9 @@ export default function Voice() {
   }
 
   const stopRecording = async () => {
-      if (!isRecording) return
+      if (!isRecordingRef.current) return
       setIsRecording(false)
+      isRecordingRef.current = false
       
       // Stop AudioContext and Processor
       if (audioContextRef.current) {
@@ -326,7 +353,7 @@ export default function Voice() {
           lastAudioBufferRef.current = pcmData.buffer
           const resultText = await withTimeout(
             window.api.transcribeAudio(pcmData.buffer),
-            30000,
+            TRANSCRIBE_TIMEOUT_MS,
             '语音识别超时，请检查网络后重试'
           )
           setTranscribedText(resultText)
@@ -340,6 +367,10 @@ export default function Voice() {
           setProcessingLabel('')
       }
   }
+
+  useEffect(() => {
+    stopRecordingRef.current = stopRecording
+  }, [stopRecording])
   
   const [processingProvider, setProcessingProvider] = useState<string>('')
   const [processingLabel, setProcessingLabel] = useState('')
@@ -374,7 +405,7 @@ export default function Voice() {
       try {
           const result = await withTimeout(
             window.api.parseExpense(text, { hierarchy: expenseStructure, members }),
-            30000,
+            PARSE_TIMEOUT_MS,
             '解析超时，请检查网络后重试'
           )
           // 兼容旧接口，如果是数组则 provider 为 unknown，如果是对象则解构
@@ -454,7 +485,7 @@ export default function Voice() {
     try {
       const resultText = await withTimeout(
         window.api.transcribeAudio(buf),
-        30000,
+        TRANSCRIBE_TIMEOUT_MS,
         '语音识别超时，请检查网络后重试'
       )
       setTranscribedText(resultText)
