@@ -232,7 +232,7 @@ export default function BudgetSummary({ startDate, endDate, periodName, memberId
                                     className="p-4 flex items-center justify-between hover:bg-gray-50 cursor-pointer transition-colors"
                                     onClick={() => toggleProject(proj.name)}
                                 >
-                                    <div className="flex items-center gap-2 pl-4 w-1/3">
+                                    <div className="flex items-center gap-2 pl-4 min-w-0 w-1/3">
                                         {expandedProjects.includes(proj.name) ? <ChevronDown className="w-4 h-4 text-gray-400" /> : <ChevronRight className="w-4 h-4 text-gray-400" />}
                                         <span className="font-semibold text-gray-900 truncate" title={proj.name}>{proj.name}</span>
                                     </div>
@@ -247,7 +247,7 @@ export default function BudgetSummary({ startDate, endDate, periodName, memberId
                                                     className="py-3 px-4 pl-12 flex items-center justify-between hover:bg-gray-100 cursor-pointer transition-colors"
                                                     onClick={() => toggleCategory(`${proj.name}-${cat.name}`)}
                                                 >
-                                                    <div className="flex items-center gap-2 w-1/3">
+                                                    <div className="flex items-center gap-2 min-w-0 w-1/3">
                                                         {expandedCategories.includes(`${proj.name}-${cat.name}`) ? 
                                                             <ChevronDown className="w-3 h-3 text-gray-400" /> : 
                                                             <ChevronRight className="w-3 h-3 text-gray-400" />

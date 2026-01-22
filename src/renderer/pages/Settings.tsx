@@ -425,22 +425,22 @@ export default function Settings() {
             {importHistory.length === 0 ? (
                 <div className="p-8 text-center text-gray-400 text-sm">暂无导入记录</div>
             ) : (
-                <table className="w-full text-sm text-left">
+                <table className="w-full text-sm text-left table-fixed">
                     <thead className="bg-gray-50 text-gray-500">
                         <tr>
-                            <th className="px-6 py-3 font-medium">导入时间</th>
-                            <th className="px-6 py-3 font-medium">类型</th>
-                            <th className="px-6 py-3 font-medium">数据量</th>
+                            <th className="px-6 py-3 font-medium whitespace-nowrap w-40">导入时间</th>
+                            <th className="px-6 py-3 font-medium whitespace-nowrap w-28">类型</th>
+                            <th className="px-6 py-3 font-medium whitespace-nowrap">数据量</th>
                             <th className="px-6 py-3 font-medium text-right">操作</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
                         {importHistory.map(record => (
                             <tr key={record.id} className="hover:bg-gray-50">
-                                <td className="px-6 py-4 text-gray-600">
+                                <td className="px-6 py-4 text-gray-600 whitespace-nowrap">
                                     {format(new Date(record.import_date), 'yyyy-MM-dd HH:mm')}
                                 </td>
-                                <td className="px-6 py-4">
+                                <td className="px-6 py-4 whitespace-nowrap">
                                     <span className={`px-2 py-1 rounded-full text-xs ${
                                         record.import_type === 'expense' 
                                         ? 'bg-emerald-100 text-emerald-700' 
@@ -449,7 +449,7 @@ export default function Settings() {
                                         {record.import_type === 'expense' ? '账单数据' : '预算目标'}
                                     </span>
                                 </td>
-                                <td className="px-6 py-4 font-mono text-gray-600">
+                                <td className="px-6 py-4 font-mono text-gray-600 whitespace-nowrap truncate" title={String(record.record_count || 0)}>
                                     {record.status === 'processing'
                                       ? (() => {
                                           const job = importJobs[record.id]
@@ -460,7 +460,7 @@ export default function Settings() {
                                         })()
                                       : `${record.record_count || 0} 条`}
                                 </td>
-                                <td className="px-6 py-4 text-right">
+                                <td className="px-6 py-4 text-right whitespace-nowrap">
                                     <button 
                                         onClick={() => handleDeleteRecord(record.id)}
                                         className="text-red-600 hover:text-red-800 hover:underline font-medium"

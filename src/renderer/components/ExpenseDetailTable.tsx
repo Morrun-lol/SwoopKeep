@@ -287,12 +287,12 @@ export default function ExpenseDetailTable({ filter, startDate, endDate, title, 
               </div>
           ) : (
               <div className="overflow-x-auto">
-                  <table className="w-full text-sm text-left">
+                  <table className="w-full text-sm text-left table-fixed">
                       <thead className="text-xs text-gray-700 uppercase bg-gray-50 border-b border-gray-100">
                           <tr>
                               <th className="px-4 py-3 w-8"></th>
                               <th 
-                                className="px-4 py-3 cursor-pointer hover:bg-gray-100 transition-colors"
+                                className="px-4 py-3 cursor-pointer hover:bg-gray-100 transition-colors whitespace-nowrap w-36"
                                 onClick={() => toggleSort('expense_date')}
                               >
                                   <div className="flex items-center gap-1">
@@ -303,7 +303,7 @@ export default function ExpenseDetailTable({ filter, startDate, endDate, title, 
                                   </div>
                               </th>
                               <th 
-                                className="px-4 py-3 cursor-pointer hover:bg-gray-100 transition-colors"
+                                className="px-4 py-3 cursor-pointer hover:bg-gray-100 transition-colors whitespace-nowrap w-44"
                                 onClick={() => toggleSort('category')}
                               >
                                   <div className="flex items-center gap-1">
@@ -313,9 +313,9 @@ export default function ExpenseDetailTable({ filter, startDate, endDate, title, 
                                       )}
                                   </div>
                               </th>
-                              <th className="px-4 py-3">说明</th>
+                              <th className="px-4 py-3 whitespace-nowrap">说明</th>
                               <th 
-                                className="px-4 py-3 text-right cursor-pointer hover:bg-gray-100 transition-colors"
+                                className="px-4 py-3 text-right cursor-pointer hover:bg-gray-100 transition-colors whitespace-nowrap w-28"
                                 onClick={() => toggleSort('amount')}
                               >
                                   <div className="flex items-center justify-end gap-1">
@@ -338,23 +338,23 @@ export default function ExpenseDetailTable({ filter, startDate, endDate, title, 
                                       <td className="px-4 py-3 text-gray-400">
                                           {expandedRows.includes(expense.id) ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
                                       </td>
-                                      <td className="px-4 py-3 text-gray-600">
+                                      <td className="px-4 py-3 text-gray-600 whitespace-nowrap">
                                           {format(new Date(expense.expense_date), 'yyyy-MM-dd HH:mm')}
                                       </td>
                                       <td className="px-4 py-3">
-                                          <div className="font-medium text-gray-900">{expense.category}</div>
+                                          <div className="font-medium text-gray-900 truncate" title={expense.category}>{expense.category}</div>
                                           {(expense.project || expense.sub_category) && (
-                                              <div className="text-xs text-gray-500 mt-0.5">
-                                                  {expense.project} 
+                                              <div className="text-xs text-gray-500 mt-0.5 truncate" title={[expense.project, expense.sub_category].filter(Boolean).join(' / ')}>
+                                                  {expense.project || ''}
                                                   {expense.project && expense.sub_category && ' / '}
-                                                  {expense.sub_category}
+                                                  {expense.sub_category || ''}
                                               </div>
                                           )}
                                       </td>
-                                      <td className="px-4 py-3 text-gray-600 truncate max-w-xs">
+                                      <td className="px-4 py-3 text-gray-600 truncate" title={expense.description}>
                                           {expense.description}
                                       </td>
-                                      <td className={`px-4 py-3 text-right font-bold ${expense.amount > 1000 ? 'text-rose-600' : 'text-gray-900'}`}>
+                                      <td className={`px-4 py-3 text-right font-bold whitespace-nowrap ${expense.amount > 1000 ? 'text-rose-600' : 'text-gray-900'}`}>
                                           ¥{expense.amount.toFixed(2)}
                                       </td>
                                   </tr>

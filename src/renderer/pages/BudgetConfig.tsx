@@ -711,12 +711,21 @@ export default function BudgetConfig() {
                      paginatedGoals.map((item) => (
                         <div key={item.id} className="bg-gray-50 rounded-lg p-3 border border-gray-100 shadow-sm relative">
                             <div className="flex justify-between items-start mb-2">
-                                <div>
+                                <div className="min-w-0 flex-1">
                                     <span className="text-xs font-medium px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 mr-2">
                                         {item.expense_type}
                                     </span>
-                                    <h3 className="text-sm font-bold text-gray-900 inline-block">
-                                        {item.project || '无项目'} - {item.category || '无分类'}
+                                    <h3
+                                      className="text-sm font-bold text-gray-900 inline-block max-w-full truncate align-bottom"
+                                      title={`${String(item.project || '').trim() || '无项目'} - ${(() => {
+                                        const s = String(item.category || '').trim()
+                                        return !s || s === 'undefined' || s === 'null' ? '无分类' : s
+                                      })()}`}
+                                    >
+                                      {String(item.project || '').trim() || '无项目'} - {(() => {
+                                        const s = String(item.category || '').trim()
+                                        return !s || s === 'undefined' || s === 'null' ? '无分类' : s
+                                      })()}
                                     </h3>
                                 </div>
                                 <button 
@@ -726,9 +735,13 @@ export default function BudgetConfig() {
                                     <Trash2 className="w-4 h-4" />
                                 </button>
                             </div>
-                            <div className="flex justify-between items-end">
-                                <div className="text-xs text-gray-500">
-                                    {item.sub_category && <span>子分类: {item.sub_category}</span>}
+                            <div className="flex justify-between items-end gap-3">
+                                <div className="text-xs text-gray-500 min-w-0">
+                                    {item.sub_category && (
+                                      <span className="block truncate" title={String(item.sub_category)}>
+                                        子分类: {item.sub_category}
+                                      </span>
+                                    )}
                                 </div>
                                 <div className="text-right">
                                     <div className="text-xs text-gray-400">目标金额</div>
