@@ -1,7 +1,52 @@
 node_modules
-build
-dist
+
+# Git metadata
 .git
+.git/**
+
+# Electron build outputs
+dist
+dist/**
+dist*
+dist*/**
+dist_*
+dist_*/**
+dist_final
+dist_final/**
+dist_installer
+dist_installer/**
+dist_unpacked
+dist_unpacked/**
+dist_v2
+dist_v2/**
+out
+out/**
+
+# Capacitor native projects
+ios
+ios/**
+android
+android/**
+
+# Local caches / tooling
 .trae
-.log
-.figma
+.trae/**
+.vscode
+.vscode/**
+
+# Optional web build output (Vercel will build on demand if needed)
+dist-web
+dist-web/**
+
+# Avoid Vercel path conflicts with TS sources
+api/app.js
+api/server.js
+api/usage.js
+
+# Large binaries
+*.exe
+*.dmg
+*.msi
+*.7z
+*.zip
+*.asar
