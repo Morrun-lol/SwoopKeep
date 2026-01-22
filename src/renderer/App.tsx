@@ -16,6 +16,8 @@ import { AuthProvider, useAuth } from './context/AuthContext'
 import { isSupabaseConfigured } from './lib/runtimeConfig'
 
 function ProtectedRoute({ children }: { children: React.ReactNode }) {
+  const isE2E = (import.meta as any).env?.VITE_E2E === 'true'
+  if (isE2E) return <>{children}</>
   const { session, loading } = useAuth()
   
   if (loading) {
@@ -32,7 +34,8 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
 }
 
 function App() {
-  const needsConfig = !window.electron && !isSupabaseConfigured()
+  const isE2E = (import.meta as any).env?.VITE_E2E === 'true'
+  const needsConfig = !isE2E && !window.electron && !isSupabaseConfigured()
 
   return (
     <ErrorBoundary>

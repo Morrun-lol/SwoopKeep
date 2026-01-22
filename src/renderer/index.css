@@ -12,4 +12,7 @@
   .pt-safe-4 {
     padding-top: calc(env(safe-area-inset-top) + 1rem);
   }
+  .pt-safe-50 {
+    padding-top: max(50px, calc(env(safe-area-inset-top) + 20px));
+  }
 }

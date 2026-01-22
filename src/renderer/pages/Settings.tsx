@@ -346,15 +346,17 @@ export default function Settings() {
                         <div key={job.importId} className="bg-blue-50 border border-blue-100 rounded-xl p-4">
                           <div className="flex items-center justify-between">
                             <div className="text-sm text-blue-700">正在导入... {pct}%（{processed}/{total}）</div>
-                            <button
-                              onClick={async () => {
-                                if (!confirm('确定要取消本次导入吗？')) return
-                                await window.api.cancelImportJob(job.importId)
-                              }}
-                              className="text-xs text-blue-600 hover:text-blue-800 underline"
-                            >
-                              取消
-                            </button>
+                            {typeof (window.api as any).cancelImportJob === 'function' && (
+                              <button
+                                onClick={async () => {
+                                  if (!confirm('确定要取消本次导入吗？')) return
+                                  await (window.api as any).cancelImportJob(job.importId)
+                                }}
+                                className="text-xs text-blue-600 hover:text-blue-800 underline"
+                              >
+                                取消
+                              </button>
+                            )}
                           </div>
                           <div className="mt-2 h-2 bg-blue-100 rounded">
                             <div className="h-2 bg-blue-500 rounded" style={{ width: `${pct}%` }} />

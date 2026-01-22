@@ -52,6 +52,11 @@ export default function Voice() {
   const [testLogs, setTestLogs] = useState<string[]>([])
   const [showLogs, setShowLogs] = useState(false)
 
+  const appendLog = (msg: string) => {
+    const line = `${new Date().toISOString()} ${msg}`
+    setTestLogs((prev) => [...prev, line].slice(-120))
+  }
+
   const [families, setFamilies] = useState<any[]>([])
 
   useEffect(() => {
@@ -404,6 +409,7 @@ export default function Voice() {
       if (!text) return
       setIsProcessing(true)
       setProcessingLabel('智能解析中...')
+      appendLog(`parse-expense start len=${text.length}`)
       try {
           const result = await withTimeout(
             window.api.parseExpense(text, { hierarchy: expenseStructure, members }),
@@ -418,16 +424,20 @@ export default function Voice() {
           if (result.expenses && Array.isArray(result.expenses)) {
               setParsedData(result.expenses)
               if (result.provider) setProcessingProvider(getProviderLabel(result.provider))
+              appendLog(`parse-expense ok provider=${String(result.provider || '')}`)
           } else if (Array.isArray(result)) {
                // Fallback for old style if needed, though we changed backend
                setParsedData(result)
                setProcessingProvider('')
+               appendLog('parse-expense ok provider=unknown')
           } else {
               // Should not happen with new backend, but just in case
               setParsedData([result])
+              appendLog('parse-expense ok provider=unknown')
           }
           
       } catch (err: any) {
+          appendLog(`parse-expense error ${String(err?.message || err)}`)
           setErrorMessage(err.message)
       } finally {
           setIsProcessing(false)
@@ -583,11 +593,13 @@ export default function Voice() {
     setTranscribedText('')
     setParsedData(null)
 
+    appendLog('speech-native available check')
     const { available } = await SpeechRecognition.available()
     if (!available) {
       throw new Error('当前设备不支持语音识别')
     }
 
+    appendLog('speech-native requestPermissions')
     const perm = await SpeechRecognition.requestPermissions()
     if (perm.speechRecognition !== 'granted') {
       throw new Error('未授予语音识别/麦克风权限')
@@ -612,6 +624,7 @@ export default function Voice() {
       maxResults: 3,
       popup: false,
     })
+    appendLog('speech-native started')
   }
 
   const stopNativeSpeechRecognition = async () => {
@@ -624,6 +637,8 @@ export default function Voice() {
     } finally {
       await SpeechRecognition.removeAllListeners()
     }
+
+    appendLog('speech-native stopped')
 
     const text = (nativeSpeechLastTextRef.current || '').trim()
     if (!text) {
@@ -756,24 +771,32 @@ export default function Voice() {
   }
 
   const handleNetworkCheck = async () => {
-    setErrorMessage('正在检测网络连接...')
+    setTestStatus('testing')
+    setTestLogs([])
+    setShowLogs(true)
+    setErrorMessage('')
+    setSuccessMessage('')
     try {
       const status = await window.api.checkNetworkStatus()
-      const statusMsg = `
-        百度(CN): ${status.baidu ? '✅' : '❌'}
-        Google: ${status.google ? '✅' : '❌'}
-        Google API: ${status.googleApi ? '✅' : '❌'}
-        OpenAI API: ${status.openai ? '✅' : '❌'}
-        Gemini API: ${status.gemini ? '✅' : '❌'}
-        代理: ${status.proxy}
-        ${status.error ? `错误: ${status.error}` : ''}
-      `
-      if (status.googleApi || status.openai || status.gemini) {
-        setSuccessMessage('网络连接正常！' + statusMsg)
+      const lines = [
+        `百度(CN): ${status.baidu ? '✅' : '❌'}`,
+        `Google: ${status.google ? '✅' : '❌'}`,
+        `AI API(/api/ai/health): ${status.googleApi ? '✅' : '❌'}`,
+        `OpenAI Key 已配置: ${status.openai ? '✅' : '❌'}`,
+        `代理: ${status.proxy || '未设置'}`,
+      ]
+      if (status.error) lines.push(`错误: ${status.error}`)
+      setTestLogs(lines)
+
+      if (status.baidu && status.googleApi) {
+        setTestStatus('success')
+        setSuccessMessage('网络与服务连接正常')
       } else {
-        setErrorMessage('网络连接异常：' + statusMsg)
+        setTestStatus('error')
+        setErrorMessage('网络或服务连接异常，请检查 AI API Base URL / Supabase 配置')
       }
     } catch (err: any) {
+      setTestStatus('error')
       setErrorMessage('网络检测失败: ' + err.message)
     }
   }

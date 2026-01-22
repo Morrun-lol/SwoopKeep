@@ -3,6 +3,7 @@ import { ExpenseApi } from './ApiInterface'
 import { supabase } from '../lib/supabase'
 import * as XLSX from 'xlsx'
 import { loadRuntimeConfig } from '../lib/runtimeConfig'
+import { retryAsync } from '../lib/retry'
 
 const isInitialized = () => !!supabase
 
@@ -37,6 +38,7 @@ const fetchJsonWithTimeout = async (url: string, init: RequestInit, timeoutMs: n
     clearTimeout(t)
   }
 }
+
 
 const arrayBufferToBase64 = (buffer: ArrayBuffer) => {
   const bytes = new Uint8Array(buffer)
@@ -81,6 +83,28 @@ const startOfQuarterDate = (date: Date) => {
 const startOfYearDate = (date: Date) => new Date(date.getFullYear(), 0, 1)
 
 export class SupabaseApi implements ExpenseApi {
+
+  private importProgressListeners = new Set<(payload: any) => void>()
+  private importDoneListeners = new Set<(payload: any) => void>()
+
+  onImportExcelProgress = (cb: (payload: any) => void) => {
+    this.importProgressListeners.add(cb)
+    return () => this.importProgressListeners.delete(cb)
+  }
+
+  onImportExcelDone = (cb: (payload: any) => void) => {
+    this.importDoneListeners.add(cb)
+    return () => this.importDoneListeners.delete(cb)
+  }
+
+  getImportJobStatus = async (importId: number) => {
+    try {
+      const raw = localStorage.getItem(`importJob:${importId}`)
+      return raw ? JSON.parse(raw) : null
+    } catch {
+      return null
+    }
+  }
 
   async ensureDefaults(): Promise<void> {
     if (!isInitialized()) return
@@ -428,12 +452,50 @@ export class SupabaseApi implements ExpenseApi {
   }
 
   async checkNetworkStatus(): Promise<any> {
-    // Mock network status check
-    return { 
-        baidu: true,
-        google: true,
-        openai: true,
-        gemini: true
+    const baseUrl = getApiBaseUrl()
+
+    const probe = async (url: string, timeoutMs: number) => {
+      const controller = new AbortController()
+      const t = setTimeout(() => controller.abort(), timeoutMs)
+      try {
+        await fetch(url, { method: 'GET', mode: 'no-cors', signal: controller.signal })
+        return true
+      } catch {
+        return false
+      } finally {
+        clearTimeout(t)
+      }
+    }
+
+    const baidu = await probe('https://www.baidu.com', 5000)
+    const google = await probe('https://www.google.com', 5000)
+    let googleApi = false
+    let openai = false
+    let gemini = false
+    let error = ''
+
+    if (baseUrl) {
+      try {
+        const { res, json } = await fetchJsonWithTimeout(`${baseUrl}/api/ai/health`, { method: 'GET' }, 8000)
+        const ok = res.ok && !!json?.success
+        openai = ok && !!json?.openaiConfigured
+        googleApi = ok
+        gemini = false
+      } catch (e: any) {
+        error = e?.message || 'health check failed'
+      }
+    } else {
+      error = 'VITE_API_BASE_URL 未配置'
+    }
+
+    return {
+      baidu,
+      google,
+      googleApi,
+      openai,
+      gemini,
+      proxy: '',
+      error: error || undefined,
     }
   }
 
@@ -479,11 +541,45 @@ export class SupabaseApi implements ExpenseApi {
       if (!isInitialized()) return { success: 0, failed: 0 }
       
       try {
+        const startedAt = Date.now()
+        const bytes = buffer.byteLength
         const wb = XLSX.read(buffer, { type: 'array' })
         const ws = wb.Sheets[wb.SheetNames[0]]
         const data: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 })
 
         if (data.length < 2) return { success: 0, failed: 0 }
+
+        const total = data.length - 1
+
+        const digestHex = async () => {
+          try {
+            const subtle = (globalThis as any).crypto?.subtle
+            if (!subtle) return `${bytes}`
+            const ab = await subtle.digest('SHA-256', buffer)
+            const hex = Array.from(new Uint8Array(ab))
+              .map((b) => b.toString(16).padStart(2, '0'))
+              .join('')
+            return hex
+          } catch {
+            return `${bytes}`
+          }
+        }
+
+        const fileKey = `importResume:${await digestHex()}:${String(fileName || 'unknown')}`
+        const resumeRaw = (() => {
+          try {
+            return localStorage.getItem(fileKey)
+          } catch {
+            return null
+          }
+        })()
+        const resume = (() => {
+          try {
+            return resumeRaw ? JSON.parse(resumeRaw) : null
+          } catch {
+            return null
+          }
+        })()
 
         const header = data[0]
         const requiredHeader = ['费用归属', '项目', '分类', '子分类', '日期', '金额', '备注']
@@ -499,10 +595,10 @@ export class SupabaseApi implements ExpenseApi {
           }
         }
 
-        let successCount = 0
-        let failedCount = 0
-        let skippedCount = 0
-        const errors: { rowNumber: number, message: string }[] = []
+        let successCount = Number(resume?.success || 0)
+        let failedCount = Number(resume?.failed || 0)
+        let skippedCount = Number(resume?.skipped || 0)
+        const errors: { rowNumber: number, message: string }[] = Array.isArray(resume?.errors) ? resume.errors : []
         
         // 1. Get Families and Members Cache
         const families = await this.getAllFamilies()
@@ -515,21 +611,89 @@ export class SupabaseApi implements ExpenseApi {
         
         const members = await this.getAllMembers()
 
-        // 2. Create Import History Record
-        const { data: importHistory } = await supabase!
+        let importId = Number(resume?.importId || 0)
+        if (!importId) {
+          const { data: importHistory } = await supabase!
             .from('import_history')
             .insert({
-                file_name: fileName || `Import_${new Date().toISOString()}`,
-                import_type: 'expense',
-                record_count: 0 
+              file_name: fileName || `Import_${new Date().toISOString()}`,
+              import_type: 'expense',
+              record_count: 0,
             })
             .select()
             .single()
-        
-        const importId = importHistory?.id || 0
+
+          importId = importHistory?.id || 0
+        }
+
+        const emitProgress = (processed: number, status: 'processing' | 'done' | 'error', extra?: any) => {
+          const payload = {
+            importId,
+            status,
+            total,
+            processed,
+            success: successCount,
+            failed: failedCount,
+            skipped: skippedCount,
+            errors,
+            bytes,
+            startedAt,
+            ...(extra || {}),
+          }
+          try {
+            localStorage.setItem(`importJob:${importId}`, JSON.stringify(payload))
+          } catch {
+          }
+          try {
+            localStorage.setItem(fileKey, JSON.stringify({
+              importId,
+              nextRowIndex: processed + 1,
+              success: successCount,
+              failed: failedCount,
+              skipped: skippedCount,
+              errors,
+              bytes,
+              updatedAt: Date.now(),
+            }))
+          } catch {
+          }
+          this.importProgressListeners.forEach((cb) => {
+            try { cb(payload) } catch { }
+          })
+        }
+
+        const emitDone = (processed: number) => {
+          const payload = {
+            importId,
+            status: 'done',
+            total,
+            processed,
+            success: successCount,
+            failed: failedCount,
+            skipped: skippedCount,
+            errors,
+            bytes,
+            startedAt,
+            finishedAt: Date.now(),
+          }
+          try {
+            localStorage.removeItem(fileKey)
+          } catch {
+          }
+          try {
+            localStorage.setItem(`importJob:${importId}`, JSON.stringify(payload))
+          } catch {
+          }
+          this.importDoneListeners.forEach((cb) => {
+            try { cb(payload) } catch { }
+          })
+        }
+
+        const startRowIndex = Math.min(Math.max(1, Number(resume?.nextRowIndex || 1)), data.length)
+        emitProgress(startRowIndex - 1, 'processing')
 
         // 3. Process Rows
-        for (let i = 1; i < data.length; i++) {
+        for (let i = startRowIndex; i < data.length; i++) {
             const row = data[i]
             if (!row || row.length === 0) continue
 
@@ -579,7 +743,8 @@ export class SupabaseApi implements ExpenseApi {
                 const finalCategory = category || '其他'
                 
                 // Check duplicate (Simple check)
-                const { data: existing } = await supabase!
+                const existing = await retryAsync(async () => {
+                  const { data: found } = await supabase!
                     .from('expense_records')
                     .select('id')
                     .eq('expense_date', dateStr)
@@ -587,13 +752,17 @@ export class SupabaseApi implements ExpenseApi {
                     .eq('category', String(finalCategory))
                     .eq('description', note || '')
                     .maybeSingle()
+                  return found
+                }, { retries: 3, minDelayMs: 200 })
                 
                 if (existing) {
                     skippedCount++
+                    emitProgress(i, 'processing')
                     continue
                 }
 
-                await this.createExpense({
+                await retryAsync(async () => {
+                  await this.createExpense({
                     project: project ? String(project) : undefined,
                     category: String(finalCategory),
                     sub_category: subCategory ? String(subCategory) : undefined,
@@ -601,13 +770,18 @@ export class SupabaseApi implements ExpenseApi {
                     expense_date: dateStr,
                     description: note || '',
                     member_id: memberId || undefined,
-                    import_id: importId
-                })
+                    import_id: importId,
+                  })
+                  return true
+                }, { retries: 3, minDelayMs: 500 })
                 successCount++
+                emitProgress(i, 'processing')
             } catch (e) {
                 console.error(`Row ${i} failed`, e)
                 failedCount++
-                errors.push({ rowNumber: i + 1, message: (e as any)?.message || '导入失败' })
+                const msg = (e as any)?.message || '导入失败'
+                errors.push({ rowNumber: i + 1, message: `${msg}（文件大小=${bytes}B, 时间=${new Date().toISOString()}）` })
+                emitProgress(i, 'processing')
             }
         }
 
@@ -619,6 +793,7 @@ export class SupabaseApi implements ExpenseApi {
                 .eq('id', importId)
         }
 
+        emitDone(total)
         return { success: successCount, failed: failedCount, skipped: skippedCount, importId, errors }
 
       } catch (e) {
@@ -760,27 +935,47 @@ export class SupabaseApi implements ExpenseApi {
   async recognizeImage(buffer: ArrayBuffer): Promise<{ text: string; provider: string }> {
       const baseUrl = getApiBaseUrl()
       try {
-        const response = await fetch(`${baseUrl}/api/ai/recognize-image`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            imageBase64: arrayBufferToBase64(buffer),
-            mimeType: 'image/jpeg',
-          }),
-        })
+        if (!baseUrl) throw new Error('未配置识别服务地址')
 
-        if (!response.ok) {
-          throw new Error('Image recognition failed')
+        const { res, json } = await fetchJsonWithTimeout(
+          `${baseUrl}/api/ai/recognize-image`,
+          {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              imageBase64: arrayBufferToBase64(buffer),
+              mimeType: 'image/jpeg',
+            }),
+          },
+          60000,
+        )
+
+        if (!res.ok || !json?.success || typeof json.text !== 'string') {
+          throw new Error(json?.error || '图片识别失败')
         }
 
-        const payload = await response.json()
-        if (!payload?.success || typeof payload.text !== 'string') {
-          throw new Error('Image recognition failed')
-        }
-
-        return { text: payload.text, provider: 'openai' }
+        return { text: json.text, provider: String(json.provider || 'openai') }
       } catch {
-        return { text: 'Image recognition unavailable', provider: 'none' }
+        try {
+          const tesseract = await import('tesseract.js')
+          const createWorker = (tesseract as any).createWorker
+          if (typeof createWorker !== 'function') throw new Error('tesseract unavailable')
+
+          const blob = new Blob([buffer], { type: 'image/jpeg' })
+          const url = URL.createObjectURL(blob)
+          try {
+            const worker = await createWorker('chi_sim')
+            const result = await worker.recognize(url)
+            await worker.terminate()
+            const text = String(result?.data?.text || '').trim()
+            if (!text) throw new Error('未能识别出文字')
+            return { text, provider: 'tesseract' }
+          } finally {
+            URL.revokeObjectURL(url)
+          }
+        } catch {
+          return { text: 'Image recognition unavailable', provider: 'none' }
+        }
       }
   }
 
