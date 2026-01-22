@@ -56,7 +56,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
 
       {/* Main Content */}
       <div className="flex-1 overflow-auto pb-20 md:pb-0">
-        <main className="p-4 md:p-8 max-w-7xl mx-auto">
+        <main className="px-4 pb-4 pt-safe-4 md:p-8 max-w-7xl mx-auto">
           {children}
         </main>
       </div>

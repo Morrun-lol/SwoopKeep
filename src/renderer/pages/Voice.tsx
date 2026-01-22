@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useMemo, ChangeEvent } from 'react'
 import CryptoJS from 'crypto-js'
 import { ChevronDown, Check, Plus, ArrowLeft, X, Wifi, Loader2, Info, Camera, Image as ImageIcon } from 'lucide-react'
+import { Capacitor } from '@capacitor/core'
+import { SpeechRecognition } from '@capacitor-community/speech-recognition'
 
 export default function Voice() {
   const DEFAULT_EXPENSE_STRUCTURE = useMemo(
@@ -555,11 +557,87 @@ export default function Voice() {
 
   const handleToggleRecording = () => {
     if (isProcessing) return
+
+    const isNativeMobile = !window.electron && Capacitor.isNativePlatform()
+    if (isNativeMobile) {
+      if (isRecording) {
+        stopNativeSpeechRecognition().catch(() => {})
+      } else {
+        startNativeSpeechRecognition().catch(() => {})
+      }
+      return
+    }
     
     if (isRecording) {
       stopRecording()
     } else {
       startRecording()
+    }
+  }
+
+  const nativeSpeechLastTextRef = useRef('')
+
+  const startNativeSpeechRecognition = async () => {
+    setInputType('voice')
+    setErrorMessage('')
+    setTranscribedText('')
+    setParsedData(null)
+
+    const { available } = await SpeechRecognition.available()
+    if (!available) {
+      throw new Error('当前设备不支持语音识别')
+    }
+
+    const perm = await SpeechRecognition.requestPermissions()
+    if (perm.speechRecognition !== 'granted') {
+      throw new Error('未授予语音识别/麦克风权限')
+    }
+
+    await SpeechRecognition.removeAllListeners()
+    nativeSpeechLastTextRef.current = ''
+
+    await SpeechRecognition.addListener('partialResults', (data: any) => {
+      const text = Array.isArray(data?.matches) ? String(data.matches[0] || '').trim() : ''
+      if (!text) return
+      nativeSpeechLastTextRef.current = text
+      setTranscribedText(text)
+    })
+
+    setIsRecording(true)
+    isRecordingRef.current = true
+
+    await SpeechRecognition.start({
+      language: 'zh-CN',
+      partialResults: true,
+      maxResults: 3,
+      popup: false,
+    })
+  }
+
+  const stopNativeSpeechRecognition = async () => {
+    if (!isRecordingRef.current) return
+    setIsRecording(false)
+    isRecordingRef.current = false
+
+    try {
+      await SpeechRecognition.stop()
+    } finally {
+      await SpeechRecognition.removeAllListeners()
+    }
+
+    const text = (nativeSpeechLastTextRef.current || '').trim()
+    if (!text) {
+      setErrorMessage('识别失败：未获取到语音文本，请重试')
+      return
+    }
+
+    setIsProcessing(true)
+    setProcessingLabel('智能解析中...')
+    try {
+      await handleParse(text)
+    } finally {
+      setIsProcessing(false)
+      setProcessingLabel('')
     }
   }
 

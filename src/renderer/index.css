@@ -9,4 +9,7 @@
   .pt-safe {
     padding-top: env(safe-area-inset-top);
   }
+  .pt-safe-4 {
+    padding-top: calc(env(safe-area-inset-top) + 1rem);
+  }
 }

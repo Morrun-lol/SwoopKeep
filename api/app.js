@@ -1,12 +1,18 @@
 const express = require('express')
 const cors = require('cors')
 const dotenv = require('dotenv')
-const OpenAI = require('openai')
 const fs = require('fs')
 const path = require('path')
 const os = require('os')
 const crypto = require('crypto')
 const { recordUsage, getUsageSnapshot } = require('./usage')
+
+let openAiModulePromise = null
+const getOpenAI = async () => {
+  if (!openAiModulePromise) openAiModulePromise = import('openai')
+  const mod = await openAiModulePromise
+  return mod && mod.default ? mod.default : mod
+}
 
 function loadEnv() {
   const candidates = [
@@ -277,6 +283,7 @@ app.post('/api/ai/parse-expense', async (req, res) => {
     return
   }
 
+  const OpenAI = await getOpenAI()
   const client = new OpenAI({
     apiKey: provider === 'deepseek' ? deepseekApiKey : openaiApiKey,
     baseURL:
@@ -346,6 +353,7 @@ app.post('/api/ai/transcribe', async (req, res) => {
     return
   }
 
+  const OpenAI = await getOpenAI()
   const client = new OpenAI({
     apiKey,
     baseURL: process.env.OPENAI_BASE_URL || undefined,
@@ -401,6 +409,7 @@ app.post('/api/ai/recognize-image', async (req, res) => {
     return
   }
 
+  const OpenAI = await getOpenAI()
   const client = new OpenAI({
     apiKey,
     baseURL: process.env.OPENAI_BASE_URL || undefined,
