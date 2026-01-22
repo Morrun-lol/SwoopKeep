@@ -3,13 +3,14 @@ name: iOS Build (Clean Project)
 
 on:
   push:
-    branches: [ master ]
+    branches: [ master, main ]
   pull_request:
-    branches: [ master ]
+    branches: [ master, main ]
 
 jobs:
   build:
-    runs-on: macos-latest
+    runs-on: macos-14
+    timeout-minutes: 45
     
     steps:
     - uses: actions/checkout@v4
@@ -17,24 +18,32 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@v4
       with:
-        node-version: '22.13.0'
-        check-latest: true
+        node-version: '20'
         cache: 'npm'
         
     - name: Install Dependencies
-      run: npm install
+      run: npm ci
       
     - name: Build Web Assets
       run: npm run build:web
       
-    - name: Setup Capacitor & Pods
+    - name: Sync Capacitor iOS
+      run: npx cap sync ios
+
+    - name: Cache CocoaPods
+      uses: actions/cache@v4
+      with:
+        path: |
+          ios/App/Pods
+          ~/Library/Caches/CocoaPods
+        key: ${{ runner.os }}-pods-${{ hashFiles('ios/App/Podfile.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-pods-
+
+    - name: Install Pods
+      working-directory: ios/App
       run: |
-        npm install @capacitor/cli @capacitor/core @capacitor/ios
-        # Ensure web assets are synced to native ios/App/App/public
-        npx cap sync ios
-        rm -rf ios/App/CapApp-SPM
-        rm -f ios/App/Podfile.lock
-        cd ios/App
+        rm -rf CapApp-SPM
         pod install
         
     - name: Disable Pods Manifest Check
@@ -166,9 +175,67 @@ jobs:
         # Compress the .app for Simulator (Debug folder)
         cd build/DerivedData/Build/Products/Debug-iphonesimulator
         zip -r App-Simulator.zip App.app
+
+    - name: Build for Device (Unsigned)
+      run: |
+        cd ios/App
+        rm -rf build/DerivedDataDevice
+
+        set -o pipefail
+        xcodebuild -workspace App.xcworkspace \
+          -scheme App \
+          -configuration Debug \
+          -sdk iphoneos \
+          -destination 'generic/platform=iOS' \
+          -derivedDataPath build/DerivedDataDevice \
+          IPHONEOS_DEPLOYMENT_TARGET=15.0 \
+          CODE_SIGN_IDENTITY="" \
+          CODE_SIGNING_REQUIRED=NO \
+          CODE_SIGNING_ALLOWED=NO \
+          COMPILER_INDEX_STORE_ENABLE=NO \
+          SWIFT_ENABLE_EXPLICIT_MODULES=NO \
+          ENABLE_USER_SCRIPT_SANDBOXING=NO 2>&1 | tee xcodebuild-device.log
+        exit_code=${PIPESTATUS[0]}
+        if [ $exit_code -ne 0 ]; then
+          grep -n "error:" xcodebuild-device.log | head -n 200 || true
+          exit $exit_code
+        fi
+
+        APP_PATH="build/DerivedDataDevice/Build/Products/Debug-iphoneos/App.app"
+        if [ ! -d "${APP_PATH}" ]; then
+          echo "Error: Device .app not found at ${APP_PATH}"
+          find build/DerivedDataDevice/Build/Products -maxdepth 4 -type d -name '*.app' -print || true
+          exit 1
+        fi
+
+        rm -rf build/Payload
+        mkdir -p build/Payload
+        cp -R "${APP_PATH}" build/Payload/
+        cd build
+        zip -r App-Unsigned.ipa Payload
         
     - name: Upload Simulator App
       uses: actions/upload-artifact@v4
       with:
         name: app-simulator
         path: ios/App/build/DerivedData/Build/Products/Debug-iphonesimulator/App-Simulator.zip
+
+    - name: Upload Unsigned Device IPA
+      uses: actions/upload-artifact@v4
+      with:
+        name: app-unsigned-ipa
+        path: ios/App/build/App-Unsigned.ipa
+
+    - name: Upload Xcode Build Log
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ios-xcodebuild-log
+        path: ios/App/xcodebuild.log
+
+    - name: Upload Device Build Log
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: ios-xcodebuild-device-log
+        path: ios/App/xcodebuild-device.log
