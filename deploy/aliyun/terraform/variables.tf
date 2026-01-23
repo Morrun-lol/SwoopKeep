@@ -3,6 +3,13 @@ variable "region" {
   description = "阿里云地域，例如 cn-hangzhou"
 }
 
+variable "alicloud_profile" {
+  type        = string
+  default     = "default"
+  description = "本机阿里云 CLI profile 名称（aliyun configure 创建），默认 default"
+}
+
+
 variable "name" {
   type        = string
   default     = "swoopkeep"
@@ -43,6 +50,24 @@ variable "api_image" {
   description = "API 镜像名（推荐用 ACR：registry.cn-xxx.aliyuncs.com/ns/swoopkeep-api:tag）"
 }
 
+variable "instance_type" {
+  type        = string
+  default     = ""
+  description = "可选：指定 ECS 实例规格；留空则自动选择较便宜的规格"
+}
+
+variable "system_disk_category" {
+  type        = string
+  default     = "cloud_efficiency"
+  description = "系统盘类型。默认 cloud_efficiency（便宜且兼容性好）；如需指定可用值：cloud_essd 等"
+}
+
+variable "system_disk_size" {
+  type        = number
+  default     = 20
+  description = "系统盘大小(GB)"
+}
+
 variable "domain" {
   type        = string
   default     = ""
@@ -54,4 +79,3 @@ variable "alarm_contact_groups" {
   default     = []
   description = "可选：云监控告警联系人组（需提前在控制台创建）。为空则不创建告警。"
 }
-

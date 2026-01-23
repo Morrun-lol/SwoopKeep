@@ -5,14 +5,14 @@ data "alicloud_zones" "default" {
 data "alicloud_images" "ubuntu" {
   owners      = "system"
   most_recent = true
-  name_regex  = "ubuntu_22_04"
+  name_regex  = "ubuntu_22_04_x64"
 }
 
 data "alicloud_instance_types" "default" {
   availability_zone    = data.alicloud_zones.default.zones[0].id
   image_id             = data.alicloud_images.ubuntu.images[0].id
-  cpu_core_count       = 2
-  memory_size          = 4
+  cpu_core_count       = 1
+  memory_size          = 2
   instance_charge_type = "PostPaid"
 }
 
@@ -29,7 +29,7 @@ resource "alicloud_vswitch" "this" {
 }
 
 resource "alicloud_security_group" "this" {
-  name        = "${var.name}-sg"
+  security_group_name = "${var.name}-sg"
   description = "swoopkeep api"
   vpc_id      = alicloud_vpc.this.id
 }
@@ -68,6 +68,7 @@ resource "alicloud_security_group_rule" "https" {
 }
 
 locals {
+  auto_instance_type = try(data.alicloud_instance_types.default.instance_types[0].id, "")
   user_data = <<-EOF
   #!/bin/bash
   set -euo pipefail
@@ -92,13 +93,13 @@ locals {
   cat >/opt/swoopkeep/docker-compose.yml <<'YAML'
   services:
     swoopkeep-api:
-      image: ${SWOOPKEEP_API_IMAGE}
+      image: $${SWOOPKEEP_API_IMAGE}
       restart: unless-stopped
       environment:
         - PORT=3001
-        - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-        - DEEPSEEK_BASE_URL=${DEEPSEEK_BASE_URL}
-        - DEEPSEEK_CHAT_MODEL=${DEEPSEEK_CHAT_MODEL}
+        - DEEPSEEK_API_KEY=$${DEEPSEEK_API_KEY}
+        - DEEPSEEK_BASE_URL=$${DEEPSEEK_BASE_URL}
+        - DEEPSEEK_CHAT_MODEL=$${DEEPSEEK_CHAT_MODEL}
       ports:
         - "127.0.0.1:3001:3001"
       healthcheck:
@@ -116,7 +117,7 @@ locals {
         - "80:80"
         - "443:443"
       environment:
-        - CADDY_DOMAIN=${CADDY_DOMAIN}
+        - CADDY_DOMAIN=$${CADDY_DOMAIN}
       volumes:
         - caddy_data:/data
         - caddy_config:/config
@@ -150,12 +151,12 @@ resource "alicloud_instance" "this" {
   instance_name              = "${var.name}-api"
   host_name                  = "${var.name}-api"
   image_id                   = data.alicloud_images.ubuntu.images[0].id
-  instance_type              = data.alicloud_instance_types.default.instance_types[0].id
+  instance_type              = var.instance_type != "" ? var.instance_type : local.auto_instance_type
   vswitch_id                 = alicloud_vswitch.this.id
   security_groups            = [alicloud_security_group.this.id]
   internet_max_bandwidth_out = 10
-  system_disk_category       = "cloud_efficiency"
-  system_disk_size           = 40
+  system_disk_category       = var.system_disk_category
+  system_disk_size           = var.system_disk_size
   password                   = var.instance_password
   user_data                  = base64encode(local.user_data)
 }

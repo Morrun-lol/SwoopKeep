@@ -20,6 +20,13 @@ terraform apply \
   -var api_image='swoopkeep-api:latest'
 ```
 
+如果出现报错 `no valid credential sources for Terraform Alibaba Cloud Provider found`：
+```powershell
+cd deploy/aliyun/terraform
+.\load-alicloud-env.ps1 -Profile default -Region cn-hangzhou
+terraform apply -var="region=cn-hangzhou" -var="allowed_ssh_cidr=你的公网IP/32"
+```
+
 可选：启用 CPU 告警（需要你先在控制台创建联系人组）：
 ```bash
 terraform apply \
