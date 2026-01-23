@@ -208,6 +208,31 @@ app.get('/api/ai/usage', (req, res) => {
   res.status(200).json({ success: true, data: getUsageSnapshot() })
 })
 
+app.get('/api/ai/metrics', (req, res) => {
+  const rows = getUsageSnapshot()
+  const lines = []
+  lines.push('# HELP swoopkeep_ai_requests_total Total AI API requests')
+  lines.push('# TYPE swoopkeep_ai_requests_total counter')
+  lines.push('# HELP swoopkeep_ai_request_errors_total Total AI API errors')
+  lines.push('# TYPE swoopkeep_ai_request_errors_total counter')
+  lines.push('# HELP swoopkeep_ai_request_avg_ms Average AI API latency in ms')
+  lines.push('# TYPE swoopkeep_ai_request_avg_ms gauge')
+
+  for (const r of rows) {
+    const provider = String(r.provider || 'unknown')
+    const endpoint = String(r.endpoint || 'unknown')
+    const count = Number(r.count || 0)
+    const errorCount = Number(r.errorCount || 0)
+    const avgMs = Number(r.avgMs || 0)
+    lines.push(`swoopkeep_ai_requests_total{provider="${provider}",endpoint="${endpoint}"} ${count}`)
+    lines.push(`swoopkeep_ai_request_errors_total{provider="${provider}",endpoint="${endpoint}"} ${errorCount}`)
+    lines.push(`swoopkeep_ai_request_avg_ms{provider="${provider}",endpoint="${endpoint}"} ${avgMs}`)
+  }
+
+  res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8')
+  res.status(200).send(lines.join('\n') + '\n')
+})
+
 app.post('/api/ai/reload-env', (req, res) => {
   loadEnv()
   const deepseekConfigured = !!process.env.DEEPSEEK_API_KEY

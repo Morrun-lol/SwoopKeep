@@ -27,6 +27,15 @@ const getApiBaseUrl = () => {
   return resolved.endsWith('/') ? resolved.slice(0, -1) : resolved
 }
 
+const getApiBaseUrlCandidates = () => {
+  const raw = getApiBaseUrl()
+  const parts = String(raw)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean)
+  return parts.length ? parts : [raw]
+}
+
 const fetchJsonWithTimeout = async (url: string, init: RequestInit, timeoutMs: number) => {
   const controller = new AbortController()
   const t = setTimeout(() => controller.abort(), timeoutMs)
@@ -223,7 +232,8 @@ export class SupabaseApi implements ExpenseApi {
   }
 
   async parseExpense(text: string, context?: any): Promise<any> {
-    const baseUrl = getApiBaseUrl()
+    const baseUrls = getApiBaseUrlCandidates()
+    const baseUrl = baseUrls[0]
     if (!baseUrl) throw new Error('未配置语义解析服务地址：请设置 VITE_API_BASE_URL')
 
     const hierarchy = Array.isArray(context?.hierarchy)
@@ -239,8 +249,9 @@ export class SupabaseApi implements ExpenseApi {
     try {
       const { res, json } = await retryAsync(
         async () => {
+          const chosen = baseUrls[Math.floor(Math.random() * baseUrls.length)] || baseUrl
           const { res, json } = await fetchJsonWithTimeout(
-            `${baseUrl}/api/ai/parse-expense`,
+            `${chosen}/api/ai/parse-expense`,
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
@@ -496,6 +507,7 @@ export class SupabaseApi implements ExpenseApi {
 
   async checkNetworkStatus(): Promise<any> {
     const baseUrl = getApiBaseUrl()
+    const baseUrls = getApiBaseUrlCandidates()
 
     const probe = async (url: string, timeoutMs: number) => {
       const controller = new AbortController()
@@ -520,9 +532,10 @@ export class SupabaseApi implements ExpenseApi {
     let gemini = false
     let error = ''
 
-    if (baseUrl) {
+    if (baseUrls.length && baseUrls[0]) {
       const tryHealth = async (timeoutMs: number) => {
-        const { res, json } = await fetchJsonWithTimeout(`${baseUrl}/api/ai/health`, { method: 'GET' }, timeoutMs)
+        const url = baseUrls[0]
+        const { res, json } = await fetchJsonWithTimeout(`${url}/api/ai/health`, { method: 'GET' }, timeoutMs)
         const ok = res.ok && !!json?.success
         deepseek = ok && !!json?.deepseekConfigured
         openai = ok && !!json?.openaiConfigured

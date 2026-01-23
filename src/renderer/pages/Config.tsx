@@ -70,12 +70,12 @@ export default function Config() {
               value={apiBaseUrl}
               onChange={(e) => setApiBaseUrl(e.target.value)}
               className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-emerald-500 outline-none"
-              placeholder="https://xxxx.trycloudflare.com"
+              placeholder="https://api.example.com,https://api-backup.example.com"
               autoCapitalize="none"
               autoCorrect="off"
               spellCheck={false}
             />
-            <p className="text-xs text-gray-500 mt-1">不填会尝试用当前域名推断 :3001。</p>
+            <p className="text-xs text-gray-500 mt-1">可填多个，用英文逗号分隔（故障转移用）。不填会尝试用当前域名推断 :3001。</p>
           </div>
         </div>
 

@@ -2,8 +2,8 @@ const app = require('./app')
 
 const PORT = Number(process.env.PORT || 3001)
 
-const provider = process.env.DEEPSEEK_API_KEY ? 'deepseek' : process.env.OPENAI_API_KEY ? 'openai' : 'none'
-console.log(`LLM provider: ${provider}`)
+const deepseekConfigured = !!process.env.DEEPSEEK_API_KEY
+console.log(`LLM provider: ${deepseekConfigured ? 'deepseek' : 'none'}`)
 
 const server = app.listen(PORT, () => {
   console.log(`API server ready on port ${PORT}`)
