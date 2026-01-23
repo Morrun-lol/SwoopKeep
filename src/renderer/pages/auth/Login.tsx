@@ -1,9 +1,10 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { Link, useNavigate } from 'react-router-dom'
 import { getSupabase } from '../../lib/supabase'
+import { loadRuntimeConfig } from '../../lib/runtimeConfig'
 import { Loader2, MessageSquare, Phone } from 'lucide-react'
 
 const loginSchema = z.object({
@@ -16,7 +17,31 @@ type LoginForm = z.infer<typeof loginSchema>
 export default function Login() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [networkTipVisible, setNetworkTipVisible] = useState(false)
   const navigate = useNavigate()
+
+  useEffect(() => {
+    try {
+      const shown = localStorage.getItem('networkPermissionTipShown') === '1'
+      if (!shown) {
+        setNetworkTipVisible(true)
+        localStorage.setItem('networkPermissionTipShown', '1')
+      }
+    } catch {
+      setNetworkTipVisible(true)
+    }
+
+    const cfg = loadRuntimeConfig()
+    const base = (cfg.apiBaseUrl || '').trim() || (typeof window !== 'undefined' ? window.location.origin : '')
+    const url = base ? `${base.replace(/\/$/, '')}/api/ai/health` : ''
+    if (!url) return
+
+    const controller = new AbortController()
+    const t = window.setTimeout(() => controller.abort(), 2000)
+    fetch(url, { method: 'GET', signal: controller.signal })
+      .catch(() => {})
+      .finally(() => window.clearTimeout(t))
+  }, [])
   
   const { register, handleSubmit, formState: { errors } } = useForm<LoginForm>({
     resolver: zodResolver(loginSchema)
@@ -51,6 +76,22 @@ export default function Login() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8">
       <div className="max-w-md w-full bg-white rounded-xl shadow-lg p-8">
+        {networkTipVisible && (
+          <div className="mb-6 p-3 bg-blue-50 text-blue-700 text-sm rounded-lg flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <div className="font-medium">首次使用提示</div>
+              <div className="text-xs mt-1 text-blue-700/90">
+                系统可能会弹出“网络连接”授权弹窗，请选择允许，否则登录/语音解析会失败。
+              </div>
+            </div>
+            <button
+              onClick={() => setNetworkTipVisible(false)}
+              className="text-blue-700 hover:text-blue-900 text-xs whitespace-nowrap"
+            >
+              知道了
+            </button>
+          </div>
+        )}
         <div className="text-center mb-8">
           <h1 className="text-2xl font-bold text-gray-900">欢迎回来</h1>
           <p className="text-gray-500 mt-2">请登录您的账户以继续</p>

@@ -245,11 +245,19 @@ export class SupabaseApi implements ExpenseApi {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text, context: { hierarchy, members: memberNames } }),
         },
-        60000,
+        12000,
       )
 
       if (!res.ok) {
-        const message = json?.error || '语义解析失败'
+        const message = String(json?.error || '语义解析失败')
+        if (
+          message.includes('No LLM API key configured') ||
+          message.includes('OPENAI_API_KEY') ||
+          message.includes('DEEPSEEK_API_KEY')
+        ) {
+          const local = localParseExpense(text, context)
+          return { expenses: local.expenses, provider: local.provider, fallbackReason: 'no_api_key' }
+        }
         throw new Error(message)
       }
 
@@ -515,23 +523,37 @@ export class SupabaseApi implements ExpenseApi {
       }
     }
 
-    const baidu = await probe('https://www.baidu.com', 5000)
-    const google = await probe('https://www.google.com', 5000)
+    const [baidu, google] = await Promise.all([
+      probe('https://www.baidu.com', 3000),
+      probe('https://www.google.com', 2000),
+    ])
     let googleApi = false
     let openai = false
     let gemini = false
     let error = ''
 
     if (baseUrl) {
-      try {
-        const { res, json } = await fetchJsonWithTimeout(`${baseUrl}/api/ai/health`, { method: 'GET' }, 20000)
+      const tryHealth = async (timeoutMs: number) => {
+        const { res, json } = await fetchJsonWithTimeout(`${baseUrl}/api/ai/health`, { method: 'GET' }, timeoutMs)
         const ok = res.ok && !!json?.success
         openai = ok && !!json?.openaiConfigured
         googleApi = ok
         gemini = false
+        return { ok, json }
+      }
+
+      try {
+        await tryHealth(8000)
       } catch (e: any) {
-        if (e?.name === 'AbortError') error = 'health check timeout'
-        else error = e?.message || 'health check failed'
+        if (e?.name === 'AbortError') {
+          try {
+            await tryHealth(15000)
+          } catch (e2: any) {
+            error = e2?.name === 'AbortError' ? 'health check timeout' : (e2?.message || 'health check failed')
+          }
+        } else {
+          error = e?.message || 'health check failed'
+        }
       }
     } else {
       error = 'VITE_API_BASE_URL 未配置'
