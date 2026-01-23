@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import { Plus, Trash2, Upload, Search, Filter, ArrowUpDown, ArrowUp, ArrowDown, Settings, ChevronLeft, ChevronRight, Download } from 'lucide-react'
 import ExpenseTypeManager from '../components/ExpenseTypeManager'
+import { formatMoneyInt } from '../lib/format'
 
 interface ExpenseType {
   id: number
@@ -731,7 +732,7 @@ export default function BudgetConfig() {
 
                                 <div className="flex items-center gap-2 flex-none">
                                   <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 whitespace-nowrap">目标金额</span>
-                                  <span className="text-sm font-bold text-gray-900 font-mono tabular-nums whitespace-nowrap">¥{item.goal_amount.toLocaleString()}</span>
+                                  <span className="text-sm font-bold text-gray-900 font-mono tabular-nums whitespace-nowrap">{formatMoneyInt(item.goal_amount)}</span>
                                   <button 
                                       onClick={() => handleDelete(item.id)}
                                       className="text-gray-400 hover:text-red-500 p-1"
@@ -790,7 +791,7 @@ export default function BudgetConfig() {
                         ) : (
                             paginatedGoals.map((item, idx) => (
                                 <tr key={item.id || idx} className="hover:bg-gray-50 group">
-                                    <td className="px-6 py-3">
+                                    <td className="px-6 py-3 align-middle">
                                         <select
                                             className={`w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-emerald-500 outline-none transition-colors text-xs font-medium py-1 ${
                                                 item.expense_type?.includes('固定') 
@@ -808,7 +809,7 @@ export default function BudgetConfig() {
                                             {activeExpenseTypes.map(t => <option key={t.id} value={t.name}>{t.name}</option>)}
                                         </select>
                                     </td>
-                                    <td className="px-6 py-3">
+                                    <td className="px-6 py-3 align-middle">
                                         <input 
                                             className="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-emerald-500 outline-none transition-colors text-gray-900"
                                             value={item.project || ''}
@@ -822,7 +823,7 @@ export default function BudgetConfig() {
                                             }}
                                         />
                                     </td>
-                                    <td className="px-6 py-3">
+                                    <td className="px-6 py-3 align-middle">
                                         <input 
                                             className="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-emerald-500 outline-none transition-colors font-medium text-gray-900"
                                             value={item.category || ''}
@@ -836,7 +837,7 @@ export default function BudgetConfig() {
                                             }}
                                         />
                                     </td>
-                                    <td className="px-6 py-3">
+                                    <td className="px-6 py-3 align-middle">
                                         <input 
                                             className="w-full bg-transparent border-b border-transparent hover:border-gray-300 focus:border-emerald-500 outline-none transition-colors text-gray-500"
                                             value={item.sub_category || ''}
@@ -850,7 +851,7 @@ export default function BudgetConfig() {
                                             }}
                                         />
                                     </td>
-                                    <td className="px-6 py-3 text-right">
+                                    <td className="px-6 py-3 text-right align-middle">
                                         <input 
                                             type="number" 
                                             className="w-32 text-right bg-transparent border-b border-transparent hover:border-gray-300 focus:border-emerald-500 outline-none transition-colors font-mono"
@@ -867,7 +868,7 @@ export default function BudgetConfig() {
                                             }}
                                         />
                                     </td>
-                                    <td className="px-6 py-3 text-right">
+                                    <td className="px-6 py-3 text-right align-middle">
                                         <button 
                                             onClick={() => handleDelete(item.id)}
                                             className="text-gray-400 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-opacity"

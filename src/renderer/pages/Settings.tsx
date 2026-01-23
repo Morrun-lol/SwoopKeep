@@ -312,24 +312,28 @@ export default function Settings() {
               <p className="text-sm text-gray-500 mt-1 mb-3">
                 上传填写好的 Excel 文件，系统将自动解析并导入数据。
               </p>
-              <div className="flex items-center gap-3">
-                <label className={`
-                  relative cursor-pointer bg-emerald-600 text-white px-4 py-2 rounded-lg hover:bg-emerald-700 transition-colors
-                  ${isUploading ? 'opacity-50 cursor-not-allowed' : ''}
-                `}>
-                  <span>{isUploading ? '正在导入...' : '选择文件上传'}</span>
-                  <input 
-                    type="file" 
-                    accept=".xlsx, .xls" 
-                    onChange={handleUpload}
-                    disabled={isUploading}
-                    className="hidden" 
-                  />
-                </label>
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-3">
+                  <label className={`
+                    relative cursor-pointer bg-emerald-600 text-white px-5 py-3 rounded-lg hover:bg-emerald-700 transition-colors
+                    inline-flex items-center justify-center whitespace-nowrap min-w-[140px]
+                    ${isUploading ? 'opacity-50 cursor-not-allowed' : ''}
+                  `}>
+                    <span>{isUploading ? '正在导入...' : '选择文件上传'}</span>
+                    <input 
+                      type="file" 
+                      accept=".xlsx, .xls" 
+                      onChange={handleUpload}
+                      disabled={isUploading}
+                      className="hidden" 
+                    />
+                  </label>
+                </div>
+
                 {message && (
-                  <span className={`text-sm whitespace-pre-line ${message.startsWith('✅') ? 'text-emerald-600' : message.startsWith('📤') ? 'text-blue-600' : 'text-red-600'}`}>
+                  <div className={`text-sm whitespace-pre-line ${message.startsWith('✅') ? 'text-emerald-600' : message.startsWith('📤') ? 'text-blue-600' : 'text-red-600'}`}>
                     {message}
-                  </span>
+                  </div>
                 )}
               </div>
 
@@ -342,26 +346,55 @@ export default function Settings() {
                       const total = Number(job.total || 0)
                       const processed = Number(job.processed || 0)
                       const pct = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0
+                      const startedAt = Number(job.startedAt || 0)
+                      const elapsedSec = startedAt ? Math.max(1, (Date.now() - startedAt) / 1000) : 1
+                      const speed = processed / elapsedSec
+                      const remaining = Math.max(0, total - processed)
+                      const etaSec = speed > 0 ? Math.round(remaining / speed) : 0
+                      const etaText = etaSec > 0 ? `${Math.floor(etaSec / 60)}m${etaSec % 60}s` : '-'
+                      const paused = !!job.paused
                       return (
                         <div key={job.importId} className="bg-blue-50 border border-blue-100 rounded-xl p-4">
-                          <div className="flex items-center justify-between">
-                            <div className="text-sm text-blue-700">正在导入... {pct}%（{processed}/{total}）</div>
-                            {typeof (window.api as any).cancelImportJob === 'function' && (
-                              <button
-                                onClick={async () => {
-                                  if (!confirm('确定要取消本次导入吗？')) return
-                                  await (window.api as any).cancelImportJob(job.importId)
-                                }}
-                                className="text-xs text-blue-600 hover:text-blue-800 underline"
-                              >
-                                取消
-                              </button>
-                            )}
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="text-sm text-blue-700 whitespace-nowrap">正在导入... {pct}%（{processed}/{total}）</div>
+                            <div className="flex items-center gap-3">
+                              {typeof (window.api as any).pauseImportJob === 'function' && typeof (window.api as any).resumeImportJob === 'function' && (
+                                <button
+                                  onClick={async () => {
+                                    if (paused) {
+                                      await (window.api as any).resumeImportJob(job.importId)
+                                    } else {
+                                      await (window.api as any).pauseImportJob(job.importId)
+                                    }
+                                  }}
+                                  className="text-xs text-blue-600 hover:text-blue-800 underline whitespace-nowrap"
+                                >
+                                  {paused ? '继续' : '暂停'}
+                                </button>
+                              )}
+                              {typeof (window.api as any).cancelImportJob === 'function' && (
+                                <button
+                                  onClick={async () => {
+                                    if (!confirm('确定要取消本次导入吗？')) return
+                                    await (window.api as any).cancelImportJob(job.importId)
+                                  }}
+                                  className="text-xs text-blue-600 hover:text-blue-800 underline whitespace-nowrap"
+                                >
+                                  取消
+                                </button>
+                              )}
+                            </div>
                           </div>
                           <div className="mt-2 h-2 bg-blue-100 rounded">
                             <div className="h-2 bg-blue-500 rounded" style={{ width: `${pct}%` }} />
                           </div>
-                          <div className="mt-2 text-xs text-blue-600">成功: {job.success || 0}，失败: {job.failed || 0}，跳过: {job.skipped || 0}</div>
+                          <div className="mt-2 text-xs text-blue-600 flex flex-wrap gap-x-3 gap-y-1">
+                            <span className="whitespace-nowrap">成功: {job.success || 0}</span>
+                            <span className="whitespace-nowrap">失败: {job.failed || 0}</span>
+                            <span className="whitespace-nowrap">跳过: {job.skipped || 0}</span>
+                            <span className="whitespace-nowrap">速度: {speed.toFixed(1)} 行/秒</span>
+                            <span className="whitespace-nowrap">剩余: {etaText}</span>
+                          </div>
                         </div>
                       )
                     })}

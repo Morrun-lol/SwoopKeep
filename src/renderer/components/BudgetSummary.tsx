@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { ChevronRight, ChevronDown, CheckCircle2, AlertTriangle, Info } from 'lucide-react'
+import { formatMoney } from '../lib/format'
 
 interface BudgetSummaryProps {
     startDate: string
@@ -123,10 +124,6 @@ export default function BudgetSummary({ startDate, endDate, periodName, memberId
 
     const toggleCategory = (name: string) => {
         setExpandedCategories(prev => prev.includes(name) ? prev.filter(c => c !== name) : [...prev, name])
-    }
-
-    const formatMoney = (amount: number) => {
-        return `￥${amount.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
     }
 
     const ProgressBar = ({ actual, goal, type }: { actual: number, goal: number, type: 'regular' | 'fixed' }) => {

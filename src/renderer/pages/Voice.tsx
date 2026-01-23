@@ -404,15 +404,38 @@ export default function Voice() {
     return provider
   }
 
+  const normalizeSpeechText = (raw: string) => {
+    let s = String(raw || '').trim()
+    if (!s) return s
+
+    s = s.replace(/^测试数据[:：\s]*/i, '')
+
+    const map: Record<string, string> = {
+      '０': '0', '１': '1', '２': '2', '３': '3', '４': '4',
+      '５': '5', '６': '6', '７': '7', '８': '8', '９': '9',
+      '，': ',', '。': '.', '：': ':', '；': ';', '（': '(', '）': ')',
+      '￥': '¥',
+    }
+    s = s.replace(/[０-９，。：；（）￥]/g, (ch) => map[ch] || ch)
+
+    s = s.replace(/\s+/g, ' ')
+    s = s.replace(/(\d)\s*(块钱|块|元钱)/g, '$1元')
+    s = s.replace(/人民币\s*/g, '')
+    s = s.replace(/[“”]/g, '"')
+    s = s.replace(/[’‘]/g, "'")
+    return s.trim()
+  }
+
   // 触发语义解析
   const handleParse = async (text: string) => {
       if (!text) return
       setIsProcessing(true)
       setProcessingLabel('智能解析中...')
-      appendLog(`parse-expense start len=${text.length}`)
+      const normalized = normalizeSpeechText(text)
+      appendLog(`parse-expense start len=${normalized.length}`)
       try {
           const result = await withTimeout(
-            window.api.parseExpense(text, { hierarchy: expenseStructure, members }),
+            window.api.parseExpense(normalized, { hierarchy: expenseStructure, members }),
             PARSE_TIMEOUT_MS,
             '解析超时，请检查网络后重试'
           )
@@ -438,7 +461,12 @@ export default function Voice() {
           
       } catch (err: any) {
           appendLog(`parse-expense error ${String(err?.message || err)}`)
-          setErrorMessage(err.message)
+          const msg = String(err?.message || '语义解析失败')
+          if (msg.includes('No LLM API key configured')) {
+            setErrorMessage('语义解析服务未配置可用的大模型 Key（建议配置 DEEPSEEK_API_KEY）。可先用“模拟测试”或手动填写。')
+          } else {
+            setErrorMessage(msg)
+          }
       } finally {
           setIsProcessing(false)
           setProcessingLabel('')
@@ -780,11 +808,12 @@ export default function Voice() {
       const status = await window.api.checkNetworkStatus()
       const lines = [
         `百度(CN): ${status.baidu ? '✅' : '❌'}`,
-        `Google: ${status.google ? '✅' : '❌'}`,
+        `Google(可选): ${status.google ? '✅' : '❌'}`,
         `AI API(/api/ai/health): ${status.googleApi ? '✅' : '❌'}`,
         `OpenAI Key 已配置: ${status.openai ? '✅' : '❌'}`,
         `代理: ${status.proxy || '未设置'}`,
       ]
+      if (status.baseUrl) lines.push(`AI API Base URL: ${status.baseUrl}`)
       if (status.error) lines.push(`错误: ${status.error}`)
       setTestLogs(lines)
 

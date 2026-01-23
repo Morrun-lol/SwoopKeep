@@ -11,7 +11,12 @@ export default {
     container: {
       center: true,
     },
-    extend: {},
+    extend: {
+      fontFamily: {
+        sans: ['var(--font-sans)'],
+        mono: ['var(--font-mono)'],
+      },
+    },
   },
   plugins: [],
 };

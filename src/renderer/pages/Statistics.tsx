@@ -5,6 +5,7 @@ import {
   LineChart, Line, XAxis, YAxis, CartesianGrid
 } from 'recharts'
 import ExpenseDetailTable from '../components/ExpenseDetailTable'
+import { formatAmountShort } from '../lib/format'
 
 type TimePeriod = 'week' | 'month' | 'quarter' | 'year' | 'custom'
 type Dimension = 'day' | 'week' | 'month' | 'quarter' | 'year'
@@ -22,14 +23,6 @@ const COLORS = [
   '#A78BFA', // Violet
   '#F472B6', // Pink
 ]
-
-const formatAmountShort = (amount: number) => {
-  const n = Number(amount || 0)
-  if (n >= 100000000) return `${(n / 100000000).toFixed(1)}亿`
-  if (n >= 10000) return `${(n / 10000).toFixed(1)}w`
-  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
-  return `${Math.round(n)}`
-}
 
 const getTopN = (data: any[], n: number) => {
   const sorted = [...(data || [])].sort((a, b) => Number(b.value || 0) - Number(a.value || 0))

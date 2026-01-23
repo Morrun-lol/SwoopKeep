@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { format, startOfWeek, endOfWeek, startOfMonth, endOfMonth, startOfQuarter, endOfQuarter, startOfYear, endOfYear, startOfDay, endOfDay } from 'date-fns'
 import { ChevronDown, ChevronUp, Loader2, AlertCircle, ChevronRight, ChevronLeft } from 'lucide-react'
+import { formatMoney } from '../lib/format'
 
 interface ExpenseDetailTableProps {
   // Option 1: Filter object (Legacy support or for complex filters)
@@ -367,7 +368,7 @@ export default function ExpenseDetailTable({ filter, startDate, endDate, title, 
                                           {expense.description}
                                       </td>
                                       <td className={`px-4 py-3 text-right font-bold whitespace-nowrap ${expense.amount > 1000 ? 'text-rose-600' : 'text-gray-900'}`}>
-                                          ¥{expense.amount.toFixed(2)}
+                                          {formatMoney(expense.amount)}
                                       </td>
                                   </tr>
                                   {expandedRows.includes(expense.id) && (

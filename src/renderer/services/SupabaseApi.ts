@@ -106,6 +106,44 @@ export class SupabaseApi implements ExpenseApi {
     }
   }
 
+  pauseImportJob = async (importId: number) => {
+    try {
+      localStorage.setItem(`importPause:${importId}`, '1')
+    } catch {
+    }
+  }
+
+  resumeImportJob = async (importId: number) => {
+    try {
+      localStorage.removeItem(`importPause:${importId}`)
+    } catch {
+    }
+  }
+
+  cancelImportJob = async (importId: number) => {
+    try {
+      localStorage.setItem(`importCancel:${importId}`, '1')
+    } catch {
+    }
+
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i)
+        if (!k || !k.startsWith('importResume:')) continue
+        const raw = localStorage.getItem(k)
+        if (!raw) continue
+        try {
+          const parsed = JSON.parse(raw)
+          if (Number(parsed?.importId) === Number(importId)) {
+            localStorage.removeItem(k)
+          }
+        } catch {
+        }
+      }
+    } catch {
+    }
+  }
+
   async ensureDefaults(): Promise<void> {
     if (!isInitialized()) return
     try {
@@ -495,6 +533,7 @@ export class SupabaseApi implements ExpenseApi {
       openai,
       gemini,
       proxy: '',
+      baseUrl,
       error: error || undefined,
     }
   }
@@ -689,100 +728,269 @@ export class SupabaseApi implements ExpenseApi {
           })
         }
 
+        const parseExcelDateToYmd = (raw: any) => {
+          let dateStr = ''
+          if (typeof raw === 'number') {
+            const date = new Date((raw - 25569) * 86400 * 1000)
+            dateStr = date.toISOString().split('T')[0]
+          } else {
+            dateStr = String(raw || '').trim()
+          }
+          return /^\d{4}-\d{2}-\d{2}$/.test(dateStr) ? dateStr : ''
+        }
+
+        const buildDupKey = (payload: {
+          expense_date: string
+          amount: number
+          category: string
+          description: string
+          project?: string
+          sub_category?: string
+          member_id?: number
+        }) => {
+          const date = payload.expense_date
+          const amt = Number(payload.amount)
+          const amountKey = Number.isFinite(amt) ? amt.toFixed(2) : '0.00'
+          const categoryKey = String(payload.category || '').trim()
+          const descKey = String(payload.description || '').trim()
+          const projectKey = String(payload.project || '').trim()
+          const subKey = String(payload.sub_category || '').trim()
+          const memberKey = payload.member_id ? String(payload.member_id) : ''
+          return `${date}|${amountKey}|${categoryKey}|${descKey}|${projectKey}|${subKey}|${memberKey}`
+        }
+
+        const scanDateRange = () => {
+          let minDate = ''
+          let maxDate = ''
+          for (let i = 1; i < data.length; i++) {
+            const row = data[i]
+            if (!row || row.length === 0) continue
+            const rawDate = isNew ? row[4] : row[3]
+            const ymd = parseExcelDateToYmd(rawDate)
+            if (!ymd) continue
+            if (!minDate || ymd < minDate) minDate = ymd
+            if (!maxDate || ymd > maxDate) maxDate = ymd
+          }
+          return { minDate, maxDate }
+        }
+
+        const { minDate, maxDate } = scanDateRange()
+        const existingKeys = new Set<string>()
+        if (minDate && maxDate) {
+          const pageSize = 1000
+          let from = 0
+          while (true) {
+            const { data: rows, error } = await retryAsync(async () => {
+              const q = supabase!
+                .from('expense_records')
+                .select('expense_date,amount,category,description,project,sub_category,member_id')
+                .gte('expense_date', minDate)
+                .lte('expense_date', maxDate)
+                .order('expense_date', { ascending: true })
+                .range(from, from + pageSize - 1)
+              const res = await q
+              if (res.error) throw res.error
+              return res
+            }, { retries: 3, minDelayMs: 300 })
+
+            const list = (rows as any[]) || []
+            list.forEach((r) => {
+              existingKeys.add(buildDupKey({
+                expense_date: String(r.expense_date),
+                amount: Number(r.amount),
+                category: String(r.category || ''),
+                description: String(r.description || ''),
+                project: r.project || undefined,
+                sub_category: r.sub_category || undefined,
+                member_id: r.member_id || undefined,
+              }))
+            })
+            if (!list.length || list.length < pageSize) break
+            from += pageSize
+          }
+        }
+
+        const insertBatch = async (batch: any[]) => {
+          if (!batch.length) return
+          await retryAsync(async () => {
+            const { error } = await supabase!
+              .from('expense_records')
+              .insert(batch)
+            if (error) throw error
+            return true
+          }, { retries: 3, minDelayMs: 500 })
+        }
+
+        const insertSingle = async (payload: any) => {
+          await retryAsync(async () => {
+            const { error } = await supabase!
+              .from('expense_records')
+              .insert([payload])
+            if (error) throw error
+            return true
+          }, { retries: 3, minDelayMs: 600 })
+        }
+
+        const waitIfPaused = async () => {
+          while (true) {
+            const paused = (() => {
+              try { return localStorage.getItem(`importPause:${importId}`) === '1' } catch { return false }
+            })()
+            if (!paused) return
+            emitProgress(Math.max(0, (Number(resume?.nextRowIndex || 1) - 1)), 'processing', { paused: true })
+            await new Promise((r) => setTimeout(r, 600))
+          }
+        }
+
         const startRowIndex = Math.min(Math.max(1, Number(resume?.nextRowIndex || 1)), data.length)
         emitProgress(startRowIndex - 1, 'processing')
 
-        // 3. Process Rows
-        for (let i = startRowIndex; i < data.length; i++) {
-            const row = data[i]
-            if (!row || row.length === 0) continue
+        const batchSize = 200
+        let batch: any[] = []
+        let batchRows: number[] = []
 
-            try {
-                let memberName, project, category, subCategory, rawDate, amount, note
-                
-                if (isNew) {
-                    [memberName, project, category, subCategory, rawDate, amount, note] = row
-                } else {
-                    [project, category, subCategory, rawDate, amount, note] = row
-                }
-
-                // Member Logic
-                let memberId = null
-                if (memberName) {
-                    const nameStr = String(memberName).trim()
-                    let member = members.find(m => m.name === nameStr)
-                    if (!member) {
-                        const newId = await this.createMember(nameStr, defaultFamilyId)
-                        member = { id: newId, name: nameStr, family_id: defaultFamilyId }
-                        members.push(member)
-                    }
-                    memberId = member.id
-                }
-
-                if (!amount || isNaN(Number(amount))) {
-                    failedCount++
-                    errors.push({ rowNumber: i + 1, message: '金额无效' })
-                    continue
-                }
-
-                // Date Parsing
-                let dateStr = ''
-                if (typeof rawDate === 'number') {
-                    const date = new Date((rawDate - 25569) * 86400 * 1000)
-                    dateStr = date.toISOString().split('T')[0]
-                } else {
-                    dateStr = String(rawDate || '').trim()
-                }
-
-                if (!/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-                    failedCount++
-                    errors.push({ rowNumber: i + 1, message: '日期无效，请使用 YYYY-MM-DD 或 Excel 日期格式' })
-                    continue
-                }
-
-                const finalCategory = category || '其他'
-                
-                // Check duplicate (Simple check)
-                const existing = await retryAsync(async () => {
-                  const { data: found } = await supabase!
-                    .from('expense_records')
-                    .select('id')
-                    .eq('expense_date', dateStr)
-                    .eq('amount', Number(amount))
-                    .eq('category', String(finalCategory))
-                    .eq('description', note || '')
-                    .maybeSingle()
-                  return found
-                }, { retries: 3, minDelayMs: 200 })
-                
-                if (existing) {
-                    skippedCount++
-                    emitProgress(i, 'processing')
-                    continue
-                }
-
-                await retryAsync(async () => {
-                  await this.createExpense({
-                    project: project ? String(project) : undefined,
-                    category: String(finalCategory),
-                    sub_category: subCategory ? String(subCategory) : undefined,
-                    amount: Number(amount),
-                    expense_date: dateStr,
-                    description: note || '',
-                    member_id: memberId || undefined,
-                    import_id: importId,
-                  })
-                  return true
-                }, { retries: 3, minDelayMs: 500 })
+        const flush = async (processedIndex: number) => {
+          if (!batch.length) return
+          try {
+            await insertBatch(batch)
+            batch.forEach((b) => existingKeys.add(buildDupKey(b)))
+            successCount += batch.length
+          } catch (e: any) {
+            for (let i = 0; i < batch.length; i++) {
+              try {
+                await insertSingle(batch[i])
+                existingKeys.add(buildDupKey(batch[i]))
                 successCount++
-                emitProgress(i, 'processing')
-            } catch (e) {
-                console.error(`Row ${i} failed`, e)
+              } catch (err: any) {
                 failedCount++
-                const msg = (e as any)?.message || '导入失败'
-                errors.push({ rowNumber: i + 1, message: `${msg}（文件大小=${bytes}B, 时间=${new Date().toISOString()}）` })
-                emitProgress(i, 'processing')
+                errors.push({ rowNumber: batchRows[i] + 1, message: (err?.message || '导入失败') })
+              }
             }
+          } finally {
+            batch = []
+            batchRows = []
+            emitProgress(processedIndex, 'processing')
+          }
+        }
+
+        let wasCanceled = false
+        let canceledProcessed = startRowIndex - 1
+
+        for (let i = startRowIndex; i < data.length; i++) {
+          const row = data[i]
+          if (!row || row.length === 0) continue
+
+          const canceled = (() => {
+            try { return localStorage.getItem(`importCancel:${importId}`) === '1' } catch { return false }
+          })()
+          if (canceled) {
+            await flush(i - 1)
+            wasCanceled = true
+            canceledProcessed = i - 1
+            emitProgress(i - 1, 'error', { message: '已取消' })
+            break
+          }
+
+          await waitIfPaused()
+
+          try {
+            let memberName, project, category, subCategory, rawDate, amount, note
+            if (isNew) {
+              ;[memberName, project, category, subCategory, rawDate, amount, note] = row
+            } else {
+              ;[project, category, subCategory, rawDate, amount, note] = row
+            }
+
+            let memberId = null
+            if (memberName) {
+              const nameStr = String(memberName).trim()
+              let member = members.find((m) => m.name === nameStr)
+              if (!member) {
+                const newId = await this.createMember(nameStr, defaultFamilyId)
+                member = { id: newId, name: nameStr, family_id: defaultFamilyId }
+                members.push(member)
+              }
+              memberId = member.id
+            }
+
+            const amt = Number(amount)
+            if (!Number.isFinite(amt) || amt === 0) {
+              failedCount++
+              errors.push({ rowNumber: i + 1, message: '金额无效' })
+              continue
+            }
+
+            const dateStr = parseExcelDateToYmd(rawDate)
+            if (!dateStr) {
+              failedCount++
+              errors.push({ rowNumber: i + 1, message: '日期无效，请使用 YYYY-MM-DD 或 Excel 日期格式' })
+              continue
+            }
+
+            const finalCategory = String(category || '其他')
+            const payload = {
+              project: project ? String(project).trim() : undefined,
+              category: finalCategory.trim() || '其他',
+              sub_category: subCategory ? String(subCategory).trim() : undefined,
+              amount: amt,
+              expense_date: dateStr,
+              description: String(note || '').trim(),
+              member_id: memberId || undefined,
+              import_id: importId,
+            }
+
+            const key = buildDupKey(payload)
+            if (existingKeys.has(key)) {
+              skippedCount++
+              continue
+            }
+
+            batch.push(payload)
+            batchRows.push(i)
+            if (batch.length >= batchSize) {
+              await flush(i)
+            }
+          } catch (e: any) {
+            failedCount++
+            errors.push({ rowNumber: i + 1, message: e?.message || '导入失败' })
+          }
+        }
+
+        await flush(wasCanceled ? canceledProcessed : total)
+
+        try {
+          localStorage.removeItem(`importCancel:${importId}`)
+          localStorage.removeItem(`importPause:${importId}`)
+        } catch {
+        }
+
+        if (wasCanceled) {
+          try {
+            localStorage.removeItem(fileKey)
+          } catch {
+          }
+          const payload = {
+            importId,
+            status: 'error',
+            total,
+            processed: Math.max(0, canceledProcessed),
+            success: successCount,
+            failed: failedCount,
+            skipped: skippedCount,
+            errors,
+            bytes,
+            startedAt,
+            finishedAt: Date.now(),
+            message: '已取消',
+          }
+          try {
+            localStorage.setItem(`importJob:${importId}`, JSON.stringify(payload))
+          } catch {
+          }
+          this.importDoneListeners.forEach((cb) => {
+            try { cb(payload) } catch { }
+          })
+          return { success: successCount, failed: failedCount, skipped: skippedCount, importId, errors }
         }
 
         // Update history count

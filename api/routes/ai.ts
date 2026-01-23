@@ -204,9 +204,13 @@ router.post('/parse-expense', async (req: Request, res: Response): Promise<void>
     recordUsage({ provider, endpoint: 'parse-expense', ok: true, ms: Date.now() - startedAt })
     cacheSet(cacheKey, { provider, data: expenses })
     res.status(200).json({ success: true, expenses, provider })
-  } catch {
+  } catch (e: any) {
     recordUsage({ provider, endpoint: 'parse-expense', ok: false, ms: Date.now() - startedAt })
-    res.status(500).json({ success: false, error: 'Failed to parse expense' })
+    res.status(500).json({
+      success: false,
+      error: e?.message ? String(e.message) : 'Failed to parse expense',
+      provider,
+    })
   }
 })
 
@@ -248,8 +252,8 @@ router.post('/transcribe', async (req: Request, res: Response): Promise<void> =>
     })
 
     res.status(200).json({ success: true, text: result.text })
-  } catch {
-    res.status(500).json({ success: false, error: 'Failed to transcribe audio' })
+  } catch (e: any) {
+    res.status(500).json({ success: false, error: e?.message ? String(e.message) : 'Failed to transcribe audio' })
   }
 })
 
