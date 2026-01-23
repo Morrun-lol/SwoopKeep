@@ -425,13 +425,13 @@ export default function Settings() {
             {importHistory.length === 0 ? (
                 <div className="p-8 text-center text-gray-400 text-sm">暂无导入记录</div>
             ) : (
-                <table className="w-full text-sm text-left table-fixed">
+                <table className="min-w-[720px] w-full text-sm text-left table-auto">
                     <thead className="bg-gray-50 text-gray-500">
                         <tr>
-                            <th className="px-6 py-3 font-medium whitespace-nowrap w-40">导入时间</th>
+                            <th className="px-6 py-3 font-medium whitespace-nowrap w-44">导入时间</th>
                             <th className="px-6 py-3 font-medium whitespace-nowrap w-28">类型</th>
-                            <th className="px-6 py-3 font-medium whitespace-nowrap">数据量</th>
-                            <th className="px-6 py-3 font-medium text-right">操作</th>
+                            <th className="px-6 py-3 font-medium whitespace-nowrap min-w-[220px]">数据量</th>
+                            <th className="px-6 py-3 font-medium text-right whitespace-nowrap w-20">操作</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
@@ -449,7 +449,7 @@ export default function Settings() {
                                         {record.import_type === 'expense' ? '账单数据' : '预算目标'}
                                     </span>
                                 </td>
-                                <td className="px-6 py-4 font-mono text-gray-600 whitespace-nowrap truncate" title={String(record.record_count || 0)}>
+                                <td className="px-6 py-4 font-mono text-gray-600 whitespace-nowrap">
                                     {record.status === 'processing'
                                       ? (() => {
                                           const job = importJobs[record.id]

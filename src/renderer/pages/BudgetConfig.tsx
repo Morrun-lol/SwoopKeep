@@ -710,13 +710,13 @@ export default function BudgetConfig() {
                  ) : (
                      paginatedGoals.map((item) => (
                         <div key={item.id} className="bg-gray-50 rounded-lg p-3 border border-gray-100 shadow-sm relative">
-                            <div className="flex justify-between items-start mb-2">
-                                <div className="min-w-0 flex-1">
-                                    <span className="text-xs font-medium px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 mr-2">
+                            <div className="flex items-center justify-between gap-3 mb-2">
+                                <div className="min-w-0 flex-1 flex items-center gap-2">
+                                    <span className="text-xs font-medium px-2 py-0.5 rounded bg-emerald-100 text-emerald-800 flex-none">
                                         {item.expense_type}
                                     </span>
                                     <h3
-                                      className="text-sm font-bold text-gray-900 inline-block max-w-full truncate align-bottom"
+                                      className="text-sm font-bold text-gray-900 min-w-0 truncate"
                                       title={`${String(item.project || '').trim() || '无项目'} - ${(() => {
                                         const s = String(item.category || '').trim()
                                         return !s || s === 'undefined' || s === 'null' ? '无分类' : s
@@ -728,25 +728,25 @@ export default function BudgetConfig() {
                                       })()}
                                     </h3>
                                 </div>
-                                <button 
-                                    onClick={() => handleDelete(item.id)}
-                                    className="text-gray-400 hover:text-red-500 p-1"
-                                >
-                                    <Trash2 className="w-4 h-4" />
-                                </button>
+
+                                <div className="flex items-center gap-2 flex-none">
+                                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-gray-100 text-gray-500 whitespace-nowrap">目标金额</span>
+                                  <span className="text-sm font-bold text-gray-900 font-mono tabular-nums whitespace-nowrap">¥{item.goal_amount.toLocaleString()}</span>
+                                  <button 
+                                      onClick={() => handleDelete(item.id)}
+                                      className="text-gray-400 hover:text-red-500 p-1"
+                                  >
+                                      <Trash2 className="w-4 h-4" />
+                                  </button>
+                                </div>
                             </div>
-                            <div className="flex justify-between items-end gap-3">
-                                <div className="text-xs text-gray-500 min-w-0">
-                                    {item.sub_category && (
-                                      <span className="block truncate" title={String(item.sub_category)}>
-                                        子分类: {item.sub_category}
-                                      </span>
-                                    )}
-                                </div>
-                                <div className="text-right">
-                                    <div className="text-xs text-gray-400">目标金额</div>
-                                    <div className="text-base font-bold text-gray-900">¥{item.goal_amount.toLocaleString()}</div>
-                                </div>
+
+                            <div className="text-xs text-gray-500 min-w-0">
+                                {item.sub_category && (
+                                  <span className="block truncate" title={String(item.sub_category)}>
+                                    子分类: {item.sub_category}
+                                  </span>
+                                )}
                             </div>
                         </div>
                      ))
