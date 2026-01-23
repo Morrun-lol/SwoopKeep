@@ -1,0 +1,62 @@
+name: aliyun-api-deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ master ]
+    paths:
+      - api/**
+      - deploy/aliyun/**
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Run checks
+        run: |
+          npm ci
+          npm run check
+          npm run test:unit
+
+      - name: Build API image
+        run: |
+          docker build -t "$ALIYUN_ACR_IMAGE" ./api
+        env:
+          ALIYUN_ACR_IMAGE: ${{ secrets.ALIYUN_ACR_IMAGE }}
+
+      - name: Login ACR
+        run: |
+          echo "$ALIYUN_ACR_PASSWORD" | docker login "$ALIYUN_ACR_REGISTRY" -u "$ALIYUN_ACR_USERNAME" --password-stdin
+        env:
+          ALIYUN_ACR_REGISTRY: ${{ secrets.ALIYUN_ACR_REGISTRY }}
+          ALIYUN_ACR_USERNAME: ${{ secrets.ALIYUN_ACR_USERNAME }}
+          ALIYUN_ACR_PASSWORD: ${{ secrets.ALIYUN_ACR_PASSWORD }}
+
+      - name: Push image
+        run: |
+          docker push "$ALIYUN_ACR_IMAGE"
+        env:
+          ALIYUN_ACR_IMAGE: ${{ secrets.ALIYUN_ACR_IMAGE }}
+
+      - name: Deploy via SSH (rolling restart)
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.ALIYUN_ECS_HOST }}
+          username: ${{ secrets.ALIYUN_ECS_USER }}
+          key: ${{ secrets.ALIYUN_ECS_SSH_KEY }}
+          script: |
+            set -e
+            cd /opt/swoopkeep
+            if [ -f .env ]; then
+              if grep -q '^SWOOPKEEP_API_IMAGE=' .env; then
+                sed -i "s#^SWOOPKEEP_API_IMAGE=.*#SWOOPKEEP_API_IMAGE=${{ secrets.ALIYUN_ACR_IMAGE }}#" .env
+              else
+                echo "SWOOPKEEP_API_IMAGE=${{ secrets.ALIYUN_ACR_IMAGE }}" >> .env
+              fi
+            fi
+            docker compose pull || true
+            docker compose up -d --no-deps --force-recreate swoopkeep-api
+            curl -fsS http://127.0.0.1:3001/api/ai/health
+
