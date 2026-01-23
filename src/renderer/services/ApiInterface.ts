@@ -21,6 +21,7 @@ export interface ExpenseApi {
     google: boolean;
     googleApi: boolean;
     openai: boolean;
+    deepseek?: boolean;
     gemini: boolean;
     proxy: string;
     baseUrl?: string;

@@ -198,33 +198,9 @@ app.get('/api/ai/health', (req, res) => {
   res.status(200).json({
     success: true,
     deepseekConfigured,
-    openaiConfigured: deepseekConfigured || openaiConfigured,
-    provider: deepseekConfigured ? 'deepseek' : openaiConfigured ? 'openai' : 'none',
-    model: deepseekConfigured
-      ? (process.env.DEEPSEEK_CHAT_MODEL || 'deepseek-chat')
-      : (process.env.OPENAI_CHAT_MODEL || 'gpt-4o-mini'),
-  })
-})
-
-app.get('/api/ai/debug-env', (req, res) => {
-  const deepseekKey = process.env.DEEPSEEK_API_KEY || ''
-  const openaiKey = process.env.OPENAI_API_KEY || ''
-
-  const mask = (v) => {
-    if (!v) return { present: false }
-    const s = String(v)
-    return {
-      present: true,
-      length: s.length,
-      last4: s.length >= 4 ? s.slice(-4) : s,
-    }
-  }
-
-  res.status(200).json({
-    success: true,
-    loadedFrom: process.env.__ENV_LOADED_FROM || null,
-    deepseek: mask(deepseekKey),
-    openai: mask(openaiKey),
+    openaiConfigured,
+    provider: deepseekConfigured ? 'deepseek' : 'none',
+    model: deepseekConfigured ? (process.env.DEEPSEEK_CHAT_MODEL || 'deepseek-chat') : null,
   })
 })
 
@@ -240,13 +216,13 @@ app.post('/api/ai/reload-env', (req, res) => {
     success: true,
     deepseekConfigured,
     openaiConfigured,
-    provider: deepseekConfigured ? 'deepseek' : openaiConfigured ? 'openai' : 'none',
+    provider: deepseekConfigured ? 'deepseek' : 'none',
   })
 })
 
 app.post('/api/ai/parse-expense', async (req, res) => {
   const startedAt = Date.now()
-  let provider = 'none'
+  const provider = 'deepseek'
   const text = (req.body && typeof req.body.text === 'string' ? req.body.text : '').trim()
   if (!text) {
     recordUsage({ provider: 'none', endpoint: 'parse-expense', ok: false, ms: Date.now() - startedAt })
@@ -255,9 +231,16 @@ app.post('/api/ai/parse-expense', async (req, res) => {
   }
 
   const deepseekApiKey = process.env.DEEPSEEK_API_KEY
-  const openaiApiKey = process.env.OPENAI_API_KEY
-  provider = deepseekApiKey ? 'deepseek' : openaiApiKey ? 'openai' : 'none'
-  console.log(`[ai/parse-expense] provider=${provider}`)
+  if (!deepseekApiKey) {
+    recordUsage({ provider: 'none', endpoint: 'parse-expense', ok: false, ms: Date.now() - startedAt })
+    res.status(503).json({
+      success: false,
+      error: 'DeepSeek is not configured. Please set DEEPSEEK_API_KEY in server environment.',
+    })
+    return
+  }
+
+  console.log('[ai/parse-expense] provider=deepseek')
 
   const ctx = (req.body && req.body.context) || {}
   const hierarchy = Array.isArray(ctx.hierarchy) ? ctx.hierarchy.slice(0, 120) : []
@@ -274,28 +257,19 @@ app.post('/api/ai/parse-expense', async (req, res) => {
     return
   }
 
-  if (provider === 'none') {
-    recordUsage({ provider: 'none', endpoint: 'parse-expense', ok: false, ms: Date.now() - startedAt })
-    res.status(500).json({
-      success: false,
-      error: 'No LLM API key configured. Set DEEPSEEK_API_KEY (recommended) or OPENAI_API_KEY in .env and restart the API server.',
-    })
-    return
-  }
-
   const OpenAI = await getOpenAI()
   const client = new OpenAI({
-    apiKey: provider === 'deepseek' ? deepseekApiKey : openaiApiKey,
-    baseURL:
-      provider === 'deepseek'
-        ? (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1')
-        : (process.env.OPENAI_BASE_URL || undefined),
+    apiKey: deepseekApiKey,
+    baseURL: (process.env.DEEPSEEK_BASE_URL || 'https://api.deepseek.com/v1'),
   })
+
+  const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+  const jitter = (ms) => Math.round(ms * (0.85 + Math.random() * 0.3))
 
   try {
     const system =
-      'You are an expense parser. Return JSON only. Output format: {"expenses": [...]}. Each expense must include fields: ' +
-      'project, category, sub_category, amount, expense_date (YYYY-MM-DD), description, member_name, missing_info.'
+      'You are a semantic engine. Return JSON only. Output format: {"expenses": [...], "intent": "expense_recording|query|other", "sentiment": "positive|neutral|negative"}. ' +
+      'Each expense must include fields: project, category, sub_category, amount, expense_date (YYYY-MM-DD), description, member_name, missing_info.'
 
     const user =
       `文本: "${text}"\n` +
@@ -306,20 +280,34 @@ app.post('/api/ai/parse-expense', async (req, res) => {
       `1) project/category/sub_category 必须从已存在分类中选择；找不到则用 project=\"日常开支\", category=\"其他\", sub_category=\"其他\"。\n` +
       `2) 可能包含 OCR 乱码，忽略无关信息。\n` +
       `3) 如果包含多笔消费，必须拆分为多条 expenses。\n` +
-      `4) 只输出 JSON 对象，不要 Markdown。`
+      `4) intent 只能取：expense_recording|query|other。\n` +
+      `5) sentiment 只能取：positive|neutral|negative。\n` +
+      `6) 只输出 JSON 对象，不要 Markdown。`
 
-    const completion = await client.chat.completions.create({
-      model:
-        provider === 'deepseek'
-          ? (process.env.DEEPSEEK_CHAT_MODEL || 'deepseek-chat')
-          : (process.env.OPENAI_CHAT_MODEL || 'gpt-4o-mini'),
-      messages: [
-        { role: 'system', content: system },
-        { role: 'user', content: user },
-      ],
-      temperature: 0,
-      response_format: { type: 'json_object' },
-    })
+    const model = process.env.DEEPSEEK_CHAT_MODEL || 'deepseek-chat'
+
+    let completion = null
+    let lastErr = null
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        completion = await client.chat.completions.create({
+          model,
+          messages: [
+            { role: 'system', content: system },
+            { role: 'user', content: user },
+          ],
+          temperature: 0,
+          response_format: { type: 'json_object' },
+        })
+        lastErr = null
+        break
+      } catch (e) {
+        lastErr = e
+        if (attempt < 2) await sleep(jitter(400 + attempt * 700))
+      }
+    }
+
+    if (lastErr) throw lastErr
 
     const content = (completion.choices && completion.choices[0] && completion.choices[0].message && completion.choices[0].message.content) || ''
     const jsonMatch = content.match(/\{[\s\S]*\}/)
@@ -330,10 +318,18 @@ app.post('/api/ai/parse-expense', async (req, res) => {
 
     recordUsage({ provider, endpoint: 'parse-expense', ok: true, ms: Date.now() - startedAt })
     cacheSet(cacheKey, { provider, expenses })
-    res.status(200).json({ success: true, expenses, provider })
+    res.status(200).json({
+      success: true,
+      expenses,
+      provider,
+      model,
+      intent: typeof raw?.intent === 'string' ? raw.intent : undefined,
+      sentiment: typeof raw?.sentiment === 'string' ? raw.sentiment : undefined,
+    })
   } catch (e) {
     recordUsage({ provider, endpoint: 'parse-expense', ok: false, ms: Date.now() - startedAt })
-    res.status(500).json({ success: false, error: 'Failed to parse expense' })
+    const msg = (e && e.message) ? String(e.message) : 'Failed to parse expense'
+    res.status(500).json({ success: false, error: msg })
   }
 })
 

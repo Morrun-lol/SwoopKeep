@@ -4,7 +4,6 @@ import { supabase } from '../lib/supabase'
 import * as XLSX from 'xlsx'
 import { loadRuntimeConfig } from '../lib/runtimeConfig'
 import { retryAsync } from '../lib/retry'
-import { localParseExpense } from '../lib/localExpenseParse'
 
 const isInitialized = () => !!supabase
 
@@ -238,28 +237,25 @@ export class SupabaseApi implements ExpenseApi {
       : []
 
     try {
-      const { res, json } = await fetchJsonWithTimeout(
-        `${baseUrl}/api/ai/parse-expense`,
-        {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text, context: { hierarchy, members: memberNames } }),
+      const { res, json } = await retryAsync(
+        async () => {
+          const { res, json } = await fetchJsonWithTimeout(
+            `${baseUrl}/api/ai/parse-expense`,
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text, context: { hierarchy, members: memberNames } }),
+            },
+            20000,
+          )
+          if (!res.ok) {
+            const message = String(json?.error || '语义解析失败')
+            throw new Error(message)
+          }
+          return { res, json }
         },
-        12000,
+        { retries: 2, minDelayMs: 600 },
       )
-
-      if (!res.ok) {
-        const message = String(json?.error || '语义解析失败')
-        if (
-          message.includes('No LLM API key configured') ||
-          message.includes('OPENAI_API_KEY') ||
-          message.includes('DEEPSEEK_API_KEY')
-        ) {
-          const local = localParseExpense(text, context)
-          return { expenses: local.expenses, provider: local.provider, fallbackReason: 'no_api_key' }
-        }
-        throw new Error(message)
-      }
 
       const hasExpenses = Array.isArray(json?.expenses)
       const hasData = !!json?.data
@@ -289,19 +285,10 @@ export class SupabaseApi implements ExpenseApi {
         provider: json.provider || 'unknown',
       }
     } catch (e: any) {
-      const msg = String(e?.message || '')
-      const isAbort = e?.name === 'AbortError' || msg.includes('timeout')
-      const isFetch = msg.includes('Failed to fetch') || msg.includes('Load failed') || msg.includes('NetworkError')
-
-      if (isAbort || isFetch) {
-        const local = localParseExpense(text, context)
-        return {
-          expenses: local.expenses,
-          provider: local.provider,
-          fallbackReason: isAbort ? 'timeout' : 'unreachable',
-        }
+      if (e?.name === 'AbortError') throw new Error('语义解析超时，请检查网络后重试')
+      if (String(e?.message || '').includes('Failed to fetch') || String(e?.message || '').includes('Load failed')) {
+        throw new Error(`无法连接语义解析服务（${baseUrl}）。请确认服务可访问。`)
       }
-
       throw e
     }
   }
@@ -529,6 +516,7 @@ export class SupabaseApi implements ExpenseApi {
     ])
     let googleApi = false
     let openai = false
+    let deepseek = false
     let gemini = false
     let error = ''
 
@@ -536,6 +524,7 @@ export class SupabaseApi implements ExpenseApi {
       const tryHealth = async (timeoutMs: number) => {
         const { res, json } = await fetchJsonWithTimeout(`${baseUrl}/api/ai/health`, { method: 'GET' }, timeoutMs)
         const ok = res.ok && !!json?.success
+        deepseek = ok && !!json?.deepseekConfigured
         openai = ok && !!json?.openaiConfigured
         googleApi = ok
         gemini = false
@@ -564,6 +553,7 @@ export class SupabaseApi implements ExpenseApi {
       google,
       googleApi,
       openai,
+      deepseek,
       gemini,
       proxy: '',
       baseUrl,
