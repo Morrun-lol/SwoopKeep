@@ -4,6 +4,15 @@ import { supabase } from '../lib/supabase'
 import * as XLSX from 'xlsx'
 import { loadRuntimeConfig } from '../lib/runtimeConfig'
 import { retryAsync } from '../lib/retry'
+import {
+  DEFAULT_CATEGORY,
+  DEFAULT_HIERARCHY_ROW,
+  DEFAULT_PROJECT,
+  DEFAULT_SUB_CATEGORY,
+  buildHierarchyLookup,
+  ensureDefaultHierarchy,
+  normalizeHierarchyRow,
+} from '../lib/expenseHierarchy'
 
 const isInitialized = () => !!supabase
 
@@ -95,6 +104,9 @@ export class SupabaseApi implements ExpenseApi {
 
   private importProgressListeners = new Set<(payload: any) => void>()
   private importDoneListeners = new Set<(payload: any) => void>()
+
+  private expenseStructureCache: { at: number; value: any[] } | null = null
+  private expenseStructureCacheTtlMs = 5000
 
   onImportExcelProgress = (cb: (payload: any) => void) => {
     this.importProgressListeners.add(cb)
@@ -322,9 +334,17 @@ export class SupabaseApi implements ExpenseApi {
 
   async createExpense(data: any): Promise<number> {
     if (!isInitialized()) return 0
+
+    const structure = await this.getExpenseStructure()
+    const lookup = buildHierarchyLookup(structure as any)
+    const normalized = normalizeHierarchyRow(data)
+    if (!lookup.allowedTriples.has(`${normalized.project}\u0000${normalized.category}\u0000${normalized.sub_category}`)) {
+      throw new Error('分类不在历史分类标签集合中，请选择已有分类或使用默认“其他”。')
+    }
+
     const { data: res, error } = await supabase!
         .from('expense_records')
-        .insert([data])
+        .insert([{ ...data, ...normalized }])
         .select()
         .single()
     
@@ -397,9 +417,37 @@ export class SupabaseApi implements ExpenseApi {
 
   async updateExpense(id: number, data: any): Promise<boolean> {
     if (!isInitialized()) return false
+
+    const wantsHierarchyUpdate = Object.prototype.hasOwnProperty.call(data || {}, 'project')
+      || Object.prototype.hasOwnProperty.call(data || {}, 'category')
+      || Object.prototype.hasOwnProperty.call(data || {}, 'sub_category')
+
+    let payload = data
+
+    if (wantsHierarchyUpdate) {
+      const current = await this.getExpenseById(id)
+      if (!current) throw new Error('记录不存在或无权限更新')
+
+      const merged = { ...current, ...data }
+      const structure = await this.getExpenseStructure()
+      const lookup = buildHierarchyLookup(structure as any)
+      const normalized = normalizeHierarchyRow(merged)
+
+      if (!lookup.allowedTriples.has(`${normalized.project}\u0000${normalized.category}\u0000${normalized.sub_category}`)) {
+        throw new Error('分类不在历史分类标签集合中，请选择已有分类或使用默认“其他”。')
+      }
+
+      payload = {
+        ...data,
+        project: normalized.project,
+        category: normalized.category,
+        sub_category: normalized.sub_category,
+      }
+    }
+
     const { error } = await supabase!
         .from('expense_records')
-        .update(data)
+        .update(payload)
         .eq('id', id)
     return !error
   }
@@ -761,6 +809,9 @@ export class SupabaseApi implements ExpenseApi {
             localStorage.setItem(`importJob:${importId}`, JSON.stringify(payload))
           } catch {
           }
+
+          this.expenseStructureCache = null
+
           this.importDoneListeners.forEach((cb) => {
             try { cb(payload) } catch { }
           })
@@ -1174,9 +1225,31 @@ export class SupabaseApi implements ExpenseApi {
   }
 
   async getExpenseStructure(): Promise<{ project: string; category: string; sub_category: string }[]> {
-      if (!isInitialized()) return []
-      const { data } = await supabase!.from('expense_hierarchy').select('*')
-      return data || []
+      if (!isInitialized()) return [DEFAULT_HIERARCHY_ROW]
+
+      if (this.expenseStructureCache && Date.now() - this.expenseStructureCache.at < this.expenseStructureCacheTtlMs) {
+        return this.expenseStructureCache.value as any
+      }
+
+      const pageSize = 5000
+      const { data, error } = await supabase!
+        .from('expense_records')
+        .select('project,category,sub_category')
+        .order('project', { ascending: true })
+        .order('category', { ascending: true })
+        .order('sub_category', { ascending: true })
+        .limit(pageSize)
+
+      if (error) {
+        console.error('getExpenseStructure error', error)
+        const fallback = [DEFAULT_HIERARCHY_ROW]
+        this.expenseStructureCache = { at: Date.now(), value: fallback }
+        return fallback
+      }
+
+      const normalized = ensureDefaultHierarchy((data || []).map(normalizeHierarchyRow))
+      this.expenseStructureCache = { at: Date.now(), value: normalized }
+      return normalized
   }
 
   async recognizeImage(buffer: ArrayBuffer): Promise<{ text: string; provider: string }> {
@@ -1506,9 +1579,7 @@ export class SupabaseApi implements ExpenseApi {
   }
 
   async addExpenseHierarchyItem(project: string, category: string, subCategory: string): Promise<boolean> {
-      if (!isInitialized()) return false
-      await supabase!.from('expense_hierarchy').insert({ project, category, sub_category: subCategory })
-      return true
+      return false
   }
 
   async getAllExpenseTypes(): Promise<{ id: number; name: string; is_active: number }[]> {

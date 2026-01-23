@@ -98,6 +98,37 @@ const stableHash = (obj) => {
   }
 }
 
+const normToken = (s) => String(s || '').trim().toLowerCase().replace(/\s+/g, '')
+
+const bigrams = (s) => {
+  const str = String(s || '')
+  if (str.length < 2) return []
+  const out = []
+  for (let i = 0; i < str.length - 1; i++) out.push(str.slice(i, i + 2))
+  return out
+}
+
+const diceSimilarity = (a, b) => {
+  const A = String(a || '')
+  const B = String(b || '')
+  if (!A || !B) return 0
+  if (A === B) return 1
+  const ba = bigrams(A)
+  const bb = bigrams(B)
+  if (!ba.length || !bb.length) return 0
+  const map = new Map()
+  for (const x of ba) map.set(x, (map.get(x) || 0) + 1)
+  let inter = 0
+  for (const y of bb) {
+    const c = map.get(y) || 0
+    if (c > 0) {
+      map.set(y, c - 1)
+      inter++
+    }
+  }
+  return (2 * inter) / (ba.length + bb.length)
+}
+
 const buildHierarchyIndex = (hierarchy) => {
   const triples = []
   const exact = new Set()
@@ -113,7 +144,16 @@ const buildHierarchyIndex = (hierarchy) => {
     const key = `${project}>${category}>${sub_category}`
     if (exact.has(key)) return
     exact.add(key)
-    const triple = { project, category, sub_category }
+    const triple = {
+      project,
+      category,
+      sub_category,
+      _nProject: normToken(project),
+      _nCategory: normToken(category),
+      _nSub: normToken(sub_category),
+      _nPair: `${normToken(category)}>${normToken(sub_category)}`,
+      _nFull: `${normToken(project)}>${normToken(category)}>${normToken(sub_category)}`,
+    }
     triples.push(triple)
 
     const cs = `${category}>${sub_category}`
@@ -154,6 +194,31 @@ const coerceExpenseToHierarchy = (exp, idx) => {
 
   const c = idx.byCat.get(safe.category)
   if (c) return { ...safe, project: c.project, sub_category: c.sub_category }
+
+  const threshold = Number(process.env.PARSE_MATCH_THRESHOLD || process.env.SEMANTIC_MATCH_THRESHOLD || '0.72')
+  const nProject = normToken(safe.project)
+  const nCategory = normToken(safe.category)
+  const nSub = normToken(safe.sub_category)
+  const nPair = `${nCategory}>${nSub}`
+  const nFull = `${nProject}>${nCategory}>${nSub}`
+
+  let best = null
+  let bestScore = 0
+  for (const t of idx.triples) {
+    const score = Math.max(
+      diceSimilarity(nPair, t._nPair),
+      diceSimilarity(nFull, t._nFull),
+      0.6 * diceSimilarity(nCategory, t._nCategory) + 0.4 * diceSimilarity(nSub, t._nSub),
+    )
+    if (score > bestScore) {
+      bestScore = score
+      best = t
+    }
+  }
+
+  if (best && bestScore >= threshold) {
+    return { ...safe, project: best.project, category: best.category, sub_category: best.sub_category }
+  }
 
   const fallback = idx.byCatSub.get('其他>其他') || idx.byCat.get('其他')
   if (fallback) return { ...safe, project: fallback.project, category: fallback.category, sub_category: fallback.sub_category }

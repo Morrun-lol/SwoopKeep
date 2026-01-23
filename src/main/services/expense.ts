@@ -54,6 +54,18 @@ export interface MonthlyBudget {
 }
 
 export function createExpense(data: ExpenseRecord): number {
+  if (!data.import_id) {
+    const structure = getExpenseStructure()
+    const allowed = new Set(structure.map((s) => `${s.project || '默认项目'}\u0000${s.category}\u0000${s.sub_category || ''}`))
+    allowed.add(`日常开支\u0000其他\u0000其他`)
+    const project = data.project || '日常开支'
+    const category = data.category || '其他'
+    const sub = data.sub_category || '其他'
+    if (!allowed.has(`${project}\u0000${category}\u0000${sub}`)) {
+      throw new Error('分类不在历史分类标签集合中，请选择已有分类或使用默认“其他”。')
+    }
+  }
+
   const stmt = db.prepare(`
     INSERT INTO expense_records (project, category, sub_category, amount, expense_date, description, voice_text, member_id, import_id)
     VALUES (@project, @category, @sub_category, @amount, @expense_date, @description, @voice_text, @member_id, @import_id)
@@ -100,6 +112,25 @@ export function getExpenseById(id: number): ExpenseRecord | undefined {
 }
 
 export function updateExpense(id: number, data: Partial<ExpenseRecord>): boolean {
+  const wantsHierarchyUpdate = Object.prototype.hasOwnProperty.call(data, 'project')
+    || Object.prototype.hasOwnProperty.call(data, 'category')
+    || Object.prototype.hasOwnProperty.call(data, 'sub_category')
+
+  if (wantsHierarchyUpdate) {
+    const current = getExpenseById(id)
+    if (!current) throw new Error('记录不存在')
+    const merged = { ...current, ...data }
+    const structure = getExpenseStructure()
+    const allowed = new Set(structure.map((s) => `${s.project || '默认项目'}\u0000${s.category}\u0000${s.sub_category || ''}`))
+    allowed.add(`日常开支\u0000其他\u0000其他`)
+    const project = merged.project || '日常开支'
+    const category = merged.category || '其他'
+    const sub = merged.sub_category || '其他'
+    if (!allowed.has(`${project}\u0000${category}\u0000${sub}`)) {
+      throw new Error('分类不在历史分类标签集合中，请选择已有分类或使用默认“其他”。')
+    }
+  }
+
   const fields: string[] = []
   const params: any = { id }
 
@@ -488,50 +519,19 @@ export function searchExpenses(keyword: string): ExpenseRecord[] {
 }
 
 export function getExpenseStructure() {
-  // 使用 IFNULL/COALESCE 处理空项目，将其归类为 '默认项目'
-  // 注意：UNION 会自动去重
   const stmt = db.prepare(`
     SELECT DISTINCT 
       CASE WHEN project IS NULL OR project = '' THEN '默认项目' ELSE project END as project,
       category, 
       sub_category 
     FROM expense_records 
-    UNION
-    SELECT DISTINCT 
-      CASE WHEN project IS NULL OR project = '' THEN '默认项目' ELSE project END as project, 
-      category, 
-      sub_category
-    FROM expense_hierarchy
-    UNION
-    SELECT DISTINCT 
-      CASE WHEN project IS NULL OR project = '' THEN '默认项目' ELSE project END as project, 
-      category, 
-      sub_category
-    FROM year_goals
-    UNION
-    SELECT DISTINCT 
-      CASE WHEN project IS NULL OR project = '' THEN '默认项目' ELSE project END as project, 
-      category, 
-      sub_category
-    FROM monthly_budgets
     ORDER BY project, category, sub_category
   `)
   return stmt.all() as { project: string, category: string, sub_category: string }[]
 }
 
 export function addExpenseHierarchyItem(project: string, category: string, sub_category: string) {
-  try {
-    const stmt = db.prepare(`
-      INSERT INTO expense_hierarchy (project, category, sub_category)
-      VALUES (@project, @category, @sub_category)
-      ON CONFLICT(project, category, sub_category) DO NOTHING
-    `)
-    stmt.run({ project, category, sub_category })
-    return true
-  } catch (e) {
-    console.error('Failed to add expense hierarchy item:', e)
-    return false
-  }
+  return false
 }
 
 export function getMonthlyBudgets(year: number, month: number): MonthlyBudget[] {

@@ -1,25 +1,20 @@
 import { useState, useRef, useEffect, useMemo, ChangeEvent } from 'react'
 import CryptoJS from 'crypto-js'
-import { ChevronDown, Check, Plus, ArrowLeft, X, Wifi, Loader2, Info, Camera, Image as ImageIcon } from 'lucide-react'
+import { ChevronDown, Check, ArrowLeft, X, Wifi, Loader2, Info, Camera, Image as ImageIcon } from 'lucide-react'
 import { Capacitor } from '@capacitor/core'
 import { SpeechRecognition } from '@capacitor-community/speech-recognition'
+import {
+  DEFAULT_CATEGORY,
+  DEFAULT_HIERARCHY_ROW,
+  DEFAULT_SUB_CATEGORY,
+  buildHierarchyLookup,
+  coerceHierarchyTriple,
+  ensureDefaultHierarchy,
+} from '../lib/expenseHierarchy'
 
 export default function Voice() {
   const DEFAULT_EXPENSE_STRUCTURE = useMemo(
-    () => [
-      { project: '日常开支', category: '餐饮', sub_category: '饮品' },
-      { project: '日常开支', category: '餐饮', sub_category: '正餐' },
-      { project: '日常开支', category: '餐饮', sub_category: '零食' },
-      { project: '日常开支', category: '交通', sub_category: '打车' },
-      { project: '日常开支', category: '交通', sub_category: '公共交通' },
-      { project: '日常开支', category: '购物', sub_category: '日用' },
-      { project: '日常开支', category: '购物', sub_category: '食品' },
-      { project: '日常开支', category: '娱乐', sub_category: '电影' },
-      { project: '日常开支', category: '医疗', sub_category: '药品' },
-      { project: '日常开支', category: '教育', sub_category: '培训' },
-      { project: '日常开支', category: '住房', sub_category: '房租' },
-      { project: '日常开支', category: '其他', sub_category: '其他' },
-    ],
+    () => [DEFAULT_HIERARCHY_ROW],
     []
   )
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -33,7 +28,7 @@ export default function Voice() {
   const [isEditing, setIsEditing] = useState(false)
   const [isEditingText, setIsEditingText] = useState(false)
   const [editData, setEditData] = useState<any[] | null>(null)
-  const [expenseStructure, setExpenseStructure] = useState<any[]>([])
+  const [expenseStructure, setExpenseStructure] = useState<any[]>(DEFAULT_EXPENSE_STRUCTURE)
   const [members, setMembers] = useState<any[]>([])
   const [showCategorySelector, setShowCategorySelector] = useState(false)
   const [inputType, setInputType] = useState<'voice' | 'image'>('voice')
@@ -62,7 +57,7 @@ export default function Voice() {
   useEffect(() => {
       // Load expense structure for selector
       window.api.getExpenseStructure()
-        .then((s: any[]) => setExpenseStructure(s && s.length > 0 ? s : DEFAULT_EXPENSE_STRUCTURE))
+        .then((s: any[]) => setExpenseStructure(ensureDefaultHierarchy(s && s.length > 0 ? s : DEFAULT_EXPENSE_STRUCTURE)))
         .catch(() => setExpenseStructure(DEFAULT_EXPENSE_STRUCTURE))
       // Load members and families
       Promise.all([
@@ -445,17 +440,29 @@ export default function Voice() {
           // 但是这里前端还不知道，需要类型断言或检查
           
           if (result.expenses && Array.isArray(result.expenses)) {
-              setParsedData(result.expenses)
+              const lookup = buildHierarchyLookup(ensureDefaultHierarchy(expenseStructure || DEFAULT_EXPENSE_STRUCTURE) as any)
+              const coerced = result.expenses.map((e: any) => {
+                const h = coerceHierarchyTriple(e, lookup)
+                return { ...e, project: h.project, category: h.category, sub_category: h.sub_category }
+              })
+              setParsedData(coerced)
               if (result.provider) setProcessingProvider(getProviderLabel(result.provider))
               appendLog(`parse-expense ok provider=${String(result.provider || '')}`)
           } else if (Array.isArray(result)) {
                // Fallback for old style if needed, though we changed backend
-               setParsedData(result)
+               const lookup = buildHierarchyLookup(ensureDefaultHierarchy(expenseStructure || DEFAULT_EXPENSE_STRUCTURE) as any)
+               const coerced = result.map((e: any) => {
+                const h = coerceHierarchyTriple(e, lookup)
+                return { ...e, project: h.project, category: h.category, sub_category: h.sub_category }
+               })
+               setParsedData(coerced)
                setProcessingProvider('')
                appendLog('parse-expense ok provider=unknown')
           } else {
               // Should not happen with new backend, but just in case
-              setParsedData([result])
+              const lookup = buildHierarchyLookup(ensureDefaultHierarchy(expenseStructure || DEFAULT_EXPENSE_STRUCTURE) as any)
+              const h = coerceHierarchyTriple(result, lookup)
+              setParsedData([{ ...result, project: h.project, category: h.category, sub_category: h.sub_category }])
               appendLog('parse-expense ok provider=unknown')
           }
           
@@ -832,15 +839,21 @@ export default function Voice() {
 
   // Helper to get unique items for cascading dropdown
   const getProjects = () => Array.from(new Set(expenseStructure.map(i => i.project).filter(Boolean)))
-  const getCategories = (project: string) => Array.from(new Set(expenseStructure.filter(i => (!project || i.project === project)).map(i => i.category)))
-  const getSubCategories = (project: string, category: string) => Array.from(new Set(expenseStructure.filter(i => (!project || i.project === project) && i.category === category).map(i => i.sub_category).filter(Boolean)))
+  const getCategories = (project: string) => {
+    const list = Array.from(new Set(expenseStructure.filter(i => (!project || i.project === project)).map(i => i.category).filter(Boolean)))
+    return list.includes(DEFAULT_CATEGORY) ? list : [DEFAULT_CATEGORY, ...list]
+  }
+  const getSubCategories = (project: string, category: string) => {
+    const list = Array.from(new Set(expenseStructure.filter(i => (!project || i.project === project) && i.category === category).map(i => i.sub_category).filter(Boolean)))
+    return list.includes(DEFAULT_SUB_CATEGORY) ? list : [DEFAULT_SUB_CATEGORY, ...list]
+  }
 
   const [activeDropdown, setActiveDropdown] = useState<{ index: number, field: 'project' | 'category' | 'subcategory' | 'member' } | null>(null)
 
   useEffect(() => {
       // 每次打开新的下拉框时，重新加载数据，确保最新导入的数据能被显示
       if (activeDropdown) {
-          window.api.getExpenseStructure().then(setExpenseStructure).catch(console.error)
+          window.api.getExpenseStructure().then((s: any[]) => setExpenseStructure(ensureDefaultHierarchy(s || DEFAULT_EXPENSE_STRUCTURE))).catch(console.error)
       }
   }, [activeDropdown])
 
@@ -850,20 +863,24 @@ export default function Voice() {
       
       const newData = [...currentData]
       const item = { ...newData[index] }
+
+      const lookup = buildHierarchyLookup(ensureDefaultHierarchy(expenseStructure || DEFAULT_EXPENSE_STRUCTURE) as any)
       
       if (type === 'project') {
           item.project = value
-          item.category = ''
-          item.sub_category = ''
-          await window.api.addExpenseHierarchyItem(value, '', '')
+          item.category = DEFAULT_CATEGORY
+          item.sub_category = DEFAULT_SUB_CATEGORY
       } else if (type === 'category') {
           item.category = value
-          item.sub_category = ''
-          await window.api.addExpenseHierarchyItem(item.project || '', value, '')
+          item.sub_category = DEFAULT_SUB_CATEGORY
       } else if (type === 'subcategory') {
           item.sub_category = value
-          await window.api.addExpenseHierarchyItem(item.project || '', item.category, value)
       }
+
+      const coerced = coerceHierarchyTriple(item, lookup)
+      item.project = coerced.project
+      item.category = coerced.category
+      item.sub_category = coerced.sub_category
       
       newData[index] = item
       
@@ -872,8 +889,6 @@ export default function Voice() {
       } else {
           setParsedData(newData)
       }
-      
-      window.api.getExpenseStructure().then(setExpenseStructure).catch(console.error)
   }
 
   const SingleLevelSelector = ({ 
@@ -893,17 +908,6 @@ export default function Voice() {
       title?: string,
       align?: 'left' | 'right'
   }) => {
-      const [isAdding, setIsAdding] = useState(false)
-      const [newItemValue, setNewItemValue] = useState('')
-
-      const handleAddItem = async () => {
-          const value = newItemValue.trim()
-          if (!value) return
-          onSelect(value)
-          setIsAdding(false)
-          setNewItemValue('')
-      }
-
       const alignClass = align === 'left' ? 'left-0' : 'right-0'
 
       return (
@@ -915,63 +919,26 @@ export default function Voice() {
                   </button>
               </div>
               <div className="p-2 max-h-60 overflow-y-auto">
-                  {isAdding ? (
-                      <div className="p-2">
-                          <input
-                              autoFocus
-                              type="text"
-                              value={newItemValue}
-                              onChange={e => setNewItemValue(e.target.value)}
-                              placeholder={`输入新${placeholder}`}
-                              className="w-full border border-emerald-300 rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-100 mb-2"
-                              onKeyDown={e => e.key === 'Enter' && handleAddItem()}
-                          />
-                          <div className="flex gap-2">
-                              <button 
-                                  onClick={handleAddItem}
-                                  disabled={!newItemValue.trim()}
-                                  className="flex-1 bg-emerald-600 text-white text-xs py-1.5 rounded hover:bg-emerald-700 disabled:opacity-50"
-                              >
-                                  确认
-                              </button>
-                              <button 
-                                  onClick={() => { setIsAdding(false); setNewItemValue('') }}
-                                  className="flex-1 bg-gray-100 text-gray-600 text-xs py-1.5 rounded hover:bg-gray-200"
-                              >
-                                  取消
-                              </button>
-                          </div>
-                      </div>
-                  ) : (
-                      <div className="grid grid-cols-1 gap-1">
-                          {items.map((item: any) => (
-                              <button
-                                  key={item}
-                                  onClick={() => {
-                                      onSelect(item)
-                                      onClose()
-                                  }}
-                                  className={`text-left px-3 py-2 text-sm rounded flex justify-between items-center group ${selected === item ? 'bg-emerald-50 text-emerald-700 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
-                              >
-                                  <span>{item}</span>
-                                  {selected === item && <Check className="w-3 h-3 text-emerald-500" />}
-                              </button>
-                          ))}
-                          {items.length === 0 && (
-                              <div className="px-3 py-4 text-sm text-gray-400 italic text-center flex flex-col gap-2">
-                                  <span>暂无选项</span>
-                                  <span className="text-xs text-gray-300">请导入数据或手动新增</span>
-                              </div>
-                          )}
+                  <div className="grid grid-cols-1 gap-1">
+                      {items.map((item: any) => (
                           <button
-                              onClick={() => setIsAdding(true)}
-                              className="text-left px-3 py-2 text-sm text-emerald-600 hover:bg-emerald-50 rounded flex items-center gap-2 mt-1 border-t border-dashed border-emerald-100"
+                              key={item}
+                              onClick={() => {
+                                  onSelect(item)
+                                  onClose()
+                              }}
+                              className={`text-left px-3 py-2 text-sm rounded flex justify-between items-center group ${selected === item ? 'bg-emerald-50 text-emerald-700 font-medium' : 'text-gray-700 hover:bg-gray-50'}`}
                           >
-                              <Plus className="w-3 h-3" />
-                              新增{placeholder}
+                              <span>{item}</span>
+                              {selected === item && <Check className="w-3 h-3 text-emerald-500" />}
                           </button>
-                      </div>
-                  )}
+                      ))}
+                      {items.length === 0 && (
+                          <div className="px-3 py-4 text-sm text-gray-400 italic text-center">
+                              <span>暂无选项</span>
+                          </div>
+                      )}
+                  </div>
               </div>
           </div>
       )
