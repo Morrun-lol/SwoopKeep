@@ -57,15 +57,6 @@ export default function ExpenseDetailTable({ filter, startDate, endDate, title, 
     setPage(1)
   }, [filter, startDate, endDate, category]) // Depend on filter object reference or specific fields if stable
 
-  // Debounce helper
-  const debounce = (func: Function, wait: number) => {
-    let timeout: NodeJS.Timeout
-    return (...args: any[]) => {
-      clearTimeout(timeout)
-      timeout = setTimeout(() => func(...args), wait)
-    }
-  }
-
   const getDateRange = (dateStr: string, dimension: string) => {
     // Safer parsing for YYYY-MM-DD to avoid timezone shifts
     let date: Date
@@ -159,12 +150,8 @@ export default function ExpenseDetailTable({ filter, startDate, endDate, title, 
     }
   }, [filter, startDate, endDate, category, page, sortField, sortOrder])
 
-  // Debounced fetch
   useEffect(() => {
-    const handler = setTimeout(() => {
-        fetchExpenses()
-    }, 300)
-    return () => clearTimeout(handler)
+    fetchExpenses()
   }, [fetchExpenses])
 
   const toggleSort = (field: 'amount' | 'expense_date' | 'category') => {
@@ -240,8 +227,10 @@ export default function ExpenseDetailTable({ filter, startDate, endDate, title, 
   // Let's render if we have at least start/end
   if (!filter?.date && (!startDate || !endDate)) return null
 
+  const isLinked = !!(filter && filter.date)
+
   return (
-    <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden mt-6">
+    <div className={`bg-white rounded-xl border shadow-sm overflow-hidden mt-6 ${isLinked ? 'border-emerald-300 ring-1 ring-emerald-100' : 'border-gray-200'}`}>
       <div className="p-4 border-b border-gray-200 flex justify-between items-center bg-gray-50">
         <div className="flex items-center gap-4">
             <div>
@@ -249,6 +238,11 @@ export default function ExpenseDetailTable({ filter, startDate, endDate, title, 
                 <div className="text-sm text-gray-500 mt-1">
                     {renderTitle}
                     {renderCategory && <span className="ml-2 px-2 py-0.5 bg-emerald-100 text-emerald-700 rounded-full text-xs">{renderCategory}</span>}
+                    {isLinked && (
+                      <span className="ml-2 px-2 py-0.5 bg-amber-100 text-amber-800 rounded-full text-xs whitespace-nowrap">
+                        已联动筛选
+                      </span>
+                    )}
                 </div>
             </div>
             {/* onClear && filter?.date && (

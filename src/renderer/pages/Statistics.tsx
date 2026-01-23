@@ -63,6 +63,7 @@ export default function Statistics(props?: {
   
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null)
   const [selectedPoint, setSelectedPoint] = useState<{ date: string, dimension: Dimension } | null>(null)
+  const [activeTrendPoint, setActiveTrendPoint] = useState<any | null>(null)
   
   const [loading, setLoading] = useState(true)
 
@@ -356,8 +357,13 @@ export default function Statistics(props?: {
                     <LineChart
                       data={trendData}
                       margin={{ top: 16, right: 12, left: -12, bottom: 0 }}
-                      onClick={(e: any) => {
-                        const date = e?.activePayload?.[0]?.payload?.date
+                      onMouseMove={(s: any) => setActiveTrendPoint(s?.activePayload?.[0]?.payload || null)}
+                      onMouseLeave={() => setActiveTrendPoint(null)}
+                      onTouchStart={(s: any) => setActiveTrendPoint(s?.activePayload?.[0]?.payload || null)}
+                      onTouchMove={(s: any) => setActiveTrendPoint(s?.activePayload?.[0]?.payload || null)}
+                      onClick={(s: any) => {
+                        const payload = s?.activePayload?.[0]?.payload || activeTrendPoint
+                        const date = payload?.date
                         if (!date) {
                           setSelectedPoint(null)
                           return
@@ -393,7 +399,7 @@ export default function Statistics(props?: {
                         dataKey="amount"
                         stroke="#10B981"
                         strokeWidth={2.5}
-                        dot={false}
+                        dot={{ r: 10, fill: 'rgba(0,0,0,0)', stroke: 'rgba(0,0,0,0)', strokeWidth: 0, cursor: 'pointer' }}
                         activeDot={{ r: 5, strokeWidth: 2, stroke: '#ffffff' }}
                       />
                     </LineChart>
