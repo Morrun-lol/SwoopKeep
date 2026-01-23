@@ -39,7 +39,7 @@ export default function Voice() {
   const [inputType, setInputType] = useState<'voice' | 'image'>('voice')
 
   const TRANSCRIBE_TIMEOUT_MS = 60000
-  const PARSE_TIMEOUT_MS = 20000
+  const PARSE_TIMEOUT_MS = 70000
   const MAX_RECORD_SECONDS = 8
 
   const isRecordingRef = useRef(false)
