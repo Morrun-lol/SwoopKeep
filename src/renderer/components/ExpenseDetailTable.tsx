@@ -63,6 +63,24 @@ export default function ExpenseDetailTable({ filter, startDate, endDate, title, 
     if (dateStr.match(/^\d{4}-\d{2}-\d{2}$/)) {
         const [y, m, d] = dateStr.split('-').map(Number)
         date = new Date(y, m - 1, d) // Construct local date at 00:00:00
+    } else if (dateStr.match(/^\d{4}-\d{2}$/)) {
+        const [y, m] = dateStr.split('-').map(Number)
+        date = new Date(y, m - 1, 1)
+    } else if (dateStr.match(/^\d{4}$/)) {
+        const y = Number(dateStr)
+        date = new Date(y, 0, 1)
+    } else if (dateStr.match(/^\d{4}-Q[1-4]$/i)) {
+        const [yPart, qPart] = dateStr.split('-Q')
+        const y = Number(yPart)
+        const q = Number(qPart)
+        const month = (q - 1) * 3
+        date = new Date(y, month, 1)
+    } else if (dateStr.match(/^\d{4}-\d{1,2}$/)) {
+        const [yPart, wPart] = dateStr.split('-')
+        const y = Number(yPart)
+        const w = Number(wPart)
+        const jan1 = new Date(y, 0, 1)
+        date = new Date(jan1.getTime() + w * 7 * 24 * 60 * 60 * 1000)
     } else {
         date = new Date(dateStr)
     }

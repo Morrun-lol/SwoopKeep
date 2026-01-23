@@ -36,6 +36,46 @@ const getTopN = (data: any[], n: number) => {
   return sorted.slice(0, Math.max(0, n))
 }
 
+const normalizeTrendKeyToDate = (key: string, dimension: Dimension): string => {
+  const s = String(key || '').trim()
+  if (!s) return s
+  if (dimension === 'day') return s
+
+  if (dimension === 'month') {
+    const m = s.match(/^(\d{4})-(\d{2})$/)
+    if (m) return `${m[1]}-${m[2]}-01`
+    return s
+  }
+
+  if (dimension === 'year') {
+    const y = s.match(/^(\d{4})$/)
+    if (y) return `${y[1]}-01-01`
+    return s
+  }
+
+  if (dimension === 'quarter') {
+    const q = s.match(/^(\d{4})-Q([1-4])$/i)
+    if (!q) return s
+    const year = q[1]
+    const quarter = Number(q[2])
+    const month = String((quarter - 1) * 3 + 1).padStart(2, '0')
+    return `${year}-${month}-01`
+  }
+
+  if (dimension === 'week') {
+    const w = s.match(/^(\d{4})-(\d{1,2})$/)
+    if (!w) return s
+    const year = Number(w[1])
+    const week = Number(w[2])
+    const jan1 = new Date(year, 0, 1)
+    const approx = new Date(jan1.getTime() + week * 7 * 24 * 60 * 60 * 1000)
+    const start = startOfWeek(approx, { weekStartsOn: 1 })
+    return format(start, 'yyyy-MM-dd')
+  }
+
+  return s
+}
+
 export default function Statistics(props?: { 
   externalTimePeriod?: TimePeriod, 
   externalDateRange?: { start: string, end: string },
@@ -352,6 +392,14 @@ export default function Statistics(props?: {
                     ))}
                 </div>
             </div>
+            {selectedPoint && (
+              <div className="mb-3 text-xs text-gray-600 flex items-center gap-2">
+                <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 whitespace-nowrap">
+                  已选：{selectedPoint.date}
+                </span>
+                <span className="text-gray-400 whitespace-nowrap">点击图表空白处可取消</span>
+              </div>
+            )}
             <div className="w-full" style={{ height: 300 }}>
                 <ResponsiveContainer width="100%" height="100%">
                     <LineChart
@@ -363,11 +411,13 @@ export default function Statistics(props?: {
                       onTouchMove={(s: any) => setActiveTrendPoint(s?.activePayload?.[0]?.payload || null)}
                       onClick={(s: any) => {
                         const payload = s?.activePayload?.[0]?.payload || activeTrendPoint
-                        const date = payload?.date
-                        if (!date) {
+                        const idx = typeof s?.activeTooltipIndex === 'number' ? s.activeTooltipIndex : undefined
+                        const rawDate = payload?.date || s?.activeLabel || (idx !== undefined ? trendData?.[idx]?.date : undefined)
+                        if (!rawDate) {
                           setSelectedPoint(null)
                           return
                         }
+                        const date = normalizeTrendKeyToDate(String(rawDate), trendDimension)
                         setSelectedPoint({ date, dimension: trendDimension })
                       }}
                     >
