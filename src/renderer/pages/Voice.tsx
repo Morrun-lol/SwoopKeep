@@ -401,6 +401,7 @@ export default function Voice() {
     if (provider === 'openai') return 'OpenAI'
     if (provider === 'gemini') return 'Gemini'
     if (provider === 'tesseract') return '本地 OCR'
+    if (provider === 'local') return '本地解析'
     return provider
   }
 
@@ -447,6 +448,9 @@ export default function Voice() {
           if (result.expenses && Array.isArray(result.expenses)) {
               setParsedData(result.expenses)
               if (result.provider) setProcessingProvider(getProviderLabel(result.provider))
+              if (result.provider === 'local') {
+                setSuccessMessage('已使用本地解析（网络不可用时自动降级），可点击“修改”校对')
+              }
               appendLog(`parse-expense ok provider=${String(result.provider || '')}`)
           } else if (Array.isArray(result)) {
                // Fallback for old style if needed, though we changed backend

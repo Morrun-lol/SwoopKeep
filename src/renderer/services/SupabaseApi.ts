@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import * as XLSX from 'xlsx'
 import { loadRuntimeConfig } from '../lib/runtimeConfig'
 import { retryAsync } from '../lib/retry'
+import { localParseExpense } from '../lib/localExpenseParse'
 
 const isInitialized = () => !!supabase
 
@@ -280,10 +281,19 @@ export class SupabaseApi implements ExpenseApi {
         provider: json.provider || 'unknown',
       }
     } catch (e: any) {
-      if (e?.name === 'AbortError') throw new Error('语义解析超时，请检查网络后重试')
-      if (String(e?.message || '').includes('Failed to fetch')) {
-        throw new Error(`无法连接语义解析服务（${baseUrl}）。请确认服务已启动且手机/浏览器可访问。`)
+      const msg = String(e?.message || '')
+      const isAbort = e?.name === 'AbortError' || msg.includes('timeout')
+      const isFetch = msg.includes('Failed to fetch') || msg.includes('Load failed') || msg.includes('NetworkError')
+
+      if (isAbort || isFetch) {
+        const local = localParseExpense(text, context)
+        return {
+          expenses: local.expenses,
+          provider: local.provider,
+          fallbackReason: isAbort ? 'timeout' : 'unreachable',
+        }
       }
+
       throw e
     }
   }
