@@ -6,6 +6,13 @@ export type RuntimeConfig = {
 
 const STORAGE_KEY = 'trae_runtime_config'
 
+const DEFAULTS: RuntimeConfig = {
+  supabaseUrl: 'https://rzzvbzwcxglqahuyazqh.supabase.co',
+  supabaseAnonKey:
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ6enZiendjeGdscWFodXlhenFoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzNzExOTAsImV4cCI6MjA4Mzk0NzE5MH0.gK7UyLmsDvR8B_tZi_G40nLDfib5RTQQ1pJON9R5p4g',
+  apiBaseUrl: 'https://trae36celz3m.vercel.app',
+}
+
 export const loadRuntimeConfig = (): RuntimeConfig => {
   let stored: RuntimeConfig = {}
   try {
@@ -18,25 +25,41 @@ export const loadRuntimeConfig = (): RuntimeConfig => {
   const envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim()
   const envApi = (import.meta.env.VITE_API_BASE_URL || '').trim()
 
+  const api = (stored.apiBaseUrl || envApi || DEFAULTS.apiBaseUrl || '').trim() || undefined
+
   return {
-    supabaseUrl: (stored.supabaseUrl || envUrl || '').trim() || undefined,
-    supabaseAnonKey: (stored.supabaseAnonKey || envKey || '').trim() || undefined,
-    apiBaseUrl: (stored.apiBaseUrl || envApi || '').trim() || undefined,
+    supabaseUrl: (stored.supabaseUrl || envUrl || DEFAULTS.supabaseUrl || '').trim() || undefined,
+    supabaseAnonKey: (stored.supabaseAnonKey || envKey || DEFAULTS.supabaseAnonKey || '').trim() || undefined,
+    apiBaseUrl: api,
   }
 }
 
 export const saveRuntimeConfig = (patch: RuntimeConfig): void => {
   const current = loadRuntimeConfig()
-  const merged: RuntimeConfig = {
-    supabaseUrl: patch.supabaseUrl ?? current.supabaseUrl,
-    supabaseAnonKey: patch.supabaseAnonKey ?? current.supabaseAnonKey,
-    apiBaseUrl: patch.apiBaseUrl ?? current.apiBaseUrl,
+  const merged: RuntimeConfig = { ...current }
+
+  if ('supabaseUrl' in patch) {
+    const v = (patch.supabaseUrl || '').trim()
+    merged.supabaseUrl = v || undefined
   }
+  if ('supabaseAnonKey' in patch) {
+    const v = (patch.supabaseAnonKey || '').trim()
+    merged.supabaseAnonKey = v || undefined
+  }
+  if ('apiBaseUrl' in patch) {
+    const v = (patch.apiBaseUrl || '').trim()
+    merged.apiBaseUrl = v || undefined
+  }
+
   localStorage.setItem(STORAGE_KEY, JSON.stringify(merged))
 }
 
 export const clearRuntimeConfig = (): void => {
   localStorage.removeItem(STORAGE_KEY)
+}
+
+export const resetRuntimeConfigToDefaults = (): void => {
+  localStorage.setItem(STORAGE_KEY, JSON.stringify({ ...DEFAULTS }))
 }
 
 export const isSupabaseConfigured = (): boolean => {
@@ -48,4 +71,3 @@ export const getApiBaseUrlFromRuntimeConfig = (): string => {
   const cfg = loadRuntimeConfig()
   return (cfg.apiBaseUrl || '').trim()
 }
-

@@ -23,6 +23,7 @@ export interface ExpenseApi {
     openai: boolean;
     gemini: boolean;
     proxy: string;
+    baseUrl?: string;
     error?: string;
   }>
   downloadTemplate(): Promise<boolean>

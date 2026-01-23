@@ -464,7 +464,7 @@ export default function Settings() {
                             <th className="px-6 py-3 font-medium whitespace-nowrap w-44">导入时间</th>
                             <th className="px-6 py-3 font-medium whitespace-nowrap w-28">类型</th>
                             <th className="px-6 py-3 font-medium whitespace-nowrap min-w-[220px]">数据量</th>
-                            <th className="px-6 py-3 font-medium text-right whitespace-nowrap w-20">操作</th>
+                            <th className="px-6 py-3 font-medium text-right whitespace-nowrap w-20 hidden sm:table-cell">操作</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-100">
@@ -482,18 +482,29 @@ export default function Settings() {
                                         {record.import_type === 'expense' ? '账单数据' : '预算目标'}
                                     </span>
                                 </td>
-                                <td className="px-6 py-4 font-mono text-gray-600 whitespace-nowrap">
-                                    {record.status === 'processing'
-                                      ? (() => {
-                                          const job = importJobs[record.id]
-                                          const processed = Number(job?.processed || record.processed_rows || 0)
-                                          const total = Number(job?.total || record.total_rows || 0)
-                                          const pct = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0
-                                          return `${record.record_count || 0}/${total || '-'} 条（处理中 ${pct}%）`
-                                        })()
-                                      : `${record.record_count || 0} 条`}
+                                <td className="px-6 py-4 font-mono text-gray-600">
+                                    <div className="flex items-center justify-between gap-3">
+                                      <span className="whitespace-nowrap">
+                                        {record.status === 'processing'
+                                          ? (() => {
+                                              const job = importJobs[record.id]
+                                              const processed = Number(job?.processed || record.processed_rows || 0)
+                                              const total = Number(job?.total || record.total_rows || 0)
+                                              const pct = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0
+                                              return `${record.record_count || 0}/${total || '-'} 条（处理中 ${pct}%）`
+                                            })()
+                                          : `${record.record_count || 0} 条`}
+                                      </span>
+
+                                      <button
+                                        onClick={() => handleDeleteRecord(record.id)}
+                                        className="sm:hidden text-red-600 hover:text-red-800 font-medium whitespace-nowrap"
+                                      >
+                                        删除
+                                      </button>
+                                    </div>
                                 </td>
-                                <td className="px-6 py-4 text-right whitespace-nowrap">
+                                <td className="px-6 py-4 text-right whitespace-nowrap hidden sm:table-cell">
                                     <button 
                                         onClick={() => handleDeleteRecord(record.id)}
                                         className="text-red-600 hover:text-red-800 hover:underline font-medium"

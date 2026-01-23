@@ -514,13 +514,14 @@ export class SupabaseApi implements ExpenseApi {
 
     if (baseUrl) {
       try {
-        const { res, json } = await fetchJsonWithTimeout(`${baseUrl}/api/ai/health`, { method: 'GET' }, 8000)
+        const { res, json } = await fetchJsonWithTimeout(`${baseUrl}/api/ai/health`, { method: 'GET' }, 20000)
         const ok = res.ok && !!json?.success
         openai = ok && !!json?.openaiConfigured
         googleApi = ok
         gemini = false
       } catch (e: any) {
-        error = e?.message || 'health check failed'
+        if (e?.name === 'AbortError') error = 'health check timeout'
+        else error = e?.message || 'health check failed'
       }
     } else {
       error = 'VITE_API_BASE_URL 未配置'
@@ -668,6 +669,7 @@ export class SupabaseApi implements ExpenseApi {
         const emitProgress = (processed: number, status: 'processing' | 'done' | 'error', extra?: any) => {
           const payload = {
             importId,
+            importType: 'expense',
             status,
             total,
             processed,
@@ -704,6 +706,7 @@ export class SupabaseApi implements ExpenseApi {
         const emitDone = (processed: number) => {
           const payload = {
             importId,
+            importType: 'expense',
             status: 'done',
             total,
             processed,
@@ -1131,6 +1134,7 @@ export class SupabaseApi implements ExpenseApi {
       await supabase!.from('expense_records').delete().neq('id', 0)
       await supabase!.from('year_goals').delete().neq('id', 0)
       await supabase!.from('monthly_budgets').delete().neq('id', 0)
+      await supabase!.from('import_history').delete().neq('id', 0)
       return true
   }
 
@@ -1190,54 +1194,227 @@ export class SupabaseApi implements ExpenseApi {
   async importBudgetGoals(buffer: ArrayBuffer, year: number, memberId?: number): Promise<{ success: number; failed: number }> {
       if (!isInitialized()) return { success: 0, failed: 0 }
       try {
+        const startedAt = Date.now()
+        const bytes = buffer.byteLength
         const wb = XLSX.read(buffer, { type: 'array' })
         const ws = wb.Sheets[wb.SheetNames[0]]
         const data: any[][] = XLSX.utils.sheet_to_json(ws, { header: 1 })
-
         if (data.length < 2) return { success: 0, failed: 0 }
 
-        // Find header map
+        const total = data.length - 1
+
+        const digestHex = async () => {
+          try {
+            const subtle = (globalThis as any).crypto?.subtle
+            if (!subtle) return `${bytes}`
+            const ab = await subtle.digest('SHA-256', buffer)
+            const hex = Array.from(new Uint8Array(ab))
+              .map((b) => b.toString(16).padStart(2, '0'))
+              .join('')
+            return hex
+          } catch {
+            return `${bytes}`
+          }
+        }
+
+        const fileKey = `budgetImportResume:${await digestHex()}:${String(year)}:${String(memberId ?? 0)}`
+        const resumeRaw = (() => {
+          try {
+            return localStorage.getItem(fileKey)
+          } catch {
+            return null
+          }
+        })()
+        const resume = (() => {
+          try {
+            return resumeRaw ? JSON.parse(resumeRaw) : null
+          } catch {
+            return null
+          }
+        })()
+
         const headers = data[0]
         const map: any = {}
         headers.forEach((h: any, i: number) => {
-             if (typeof h === 'string') {
-                if (h.includes('费用类型')) map['type'] = i
-                else if (h.includes('项目')) map['project'] = i
-                else if (h.includes('分类') && !h.includes('子')) map['category'] = i
-                else if (h.includes('子分类')) map['sub'] = i
-                else if (h.includes('预算') || h.includes('金额')) map['amount'] = i
-             }
+          if (typeof h !== 'string') return
+          if (h.includes('费用类型')) map.type = i
+          else if (h.includes('项目')) map.project = i
+          else if (h.includes('分类') && !h.includes('子')) map.category = i
+          else if (h.includes('子分类')) map.sub = i
+          else if (h.includes('预算') || h.includes('金额')) map.amount = i
         })
 
-        if (map['category'] === undefined || map['amount'] === undefined) {
-             return { success: 0, failed: data.length - 1 }
+        if (map.category === undefined || map.amount === undefined) {
+          return { success: 0, failed: total }
         }
 
-        let successCount = 0
-        let failedCount = 0
+        let importId = Number(resume?.importId || 0)
+        if (!importId) importId = Date.now()
 
-        for (let i = 1; i < data.length; i++) {
-             const row = data[i]
-             if (!row || row.length === 0) continue
-             
-             try {
-                 await this.saveYearGoal({
-                     year,
-                     member_id: memberId,
-                     expense_type: map['type'] !== undefined ? (row[map['type']] || '常规费用') : '常规费用',
-                     project: map['project'] !== undefined ? (row[map['project']] || '') : '',
-                     category: String(row[map['category']]),
-                     sub_category: map['sub'] !== undefined ? (row[map['sub']] || '') : '',
-                     goal_amount: Number(row[map['amount']] || 0)
-                 })
-                 successCount++
-             } catch (e) {
-                 failedCount++
-             }
+        let successCount = Number(resume?.success || 0)
+        let failedCount = Number(resume?.failed || 0)
+
+        const emitProgress = (processed: number, status: 'processing' | 'done' | 'error', extra?: any) => {
+          const payload = {
+            importId,
+            importType: 'budget',
+            status,
+            total,
+            processed,
+            success: successCount,
+            failed: failedCount,
+            bytes,
+            startedAt,
+            ...(extra || {}),
+          }
+          try {
+            localStorage.setItem(`importJob:${importId}`, JSON.stringify(payload))
+          } catch {
+          }
+          try {
+            localStorage.setItem(fileKey, JSON.stringify({
+              importId,
+              nextRowIndex: processed + 1,
+              success: successCount,
+              failed: failedCount,
+              bytes,
+              updatedAt: Date.now(),
+            }))
+          } catch {
+          }
+          this.importProgressListeners.forEach((cb) => {
+            try { cb(payload) } catch { }
+          })
         }
+
+        const emitDone = (processed: number) => {
+          const payload = {
+            importId,
+            importType: 'budget',
+            status: 'done',
+            total,
+            processed,
+            success: successCount,
+            failed: failedCount,
+            bytes,
+            startedAt,
+            finishedAt: Date.now(),
+          }
+          try {
+            localStorage.removeItem(fileKey)
+          } catch {
+          }
+          try {
+            localStorage.setItem(`importJob:${importId}`, JSON.stringify(payload))
+          } catch {
+          }
+          this.importDoneListeners.forEach((cb) => {
+            try { cb(payload) } catch { }
+          })
+        }
+
+        const waitIfPaused = async () => {
+          while (true) {
+            const paused = (() => {
+              try { return localStorage.getItem(`importPause:${importId}`) === '1' } catch { return false }
+            })()
+            if (!paused) return
+            emitProgress(Math.max(0, (Number(resume?.nextRowIndex || 1) - 1)), 'processing', { paused: true })
+            await new Promise((r) => setTimeout(r, 600))
+          }
+        }
+
+        const startRowIndex = Math.min(Math.max(1, Number(resume?.nextRowIndex || 1)), data.length)
+        emitProgress(startRowIndex - 1, 'processing')
+
+        const batchSize = 200
+        let batch: any[] = []
+        let batchRows: number[] = []
+
+        const flush = async (processedIndex: number) => {
+          if (!batch.length) return
+          try {
+            await retryAsync(async () => {
+              const { error } = await supabase!
+                .from('year_goals')
+                .upsert(batch, { onConflict: 'user_id, year, project, category, sub_category, member_id' })
+              if (error) throw error
+              return true
+            }, { retries: 3, minDelayMs: 600 })
+            successCount += batch.length
+          } catch (e: any) {
+            for (let i = 0; i < batch.length; i++) {
+              try {
+                await this.saveYearGoal(batch[i])
+                successCount++
+              } catch (err: any) {
+                failedCount++
+              }
+            }
+          } finally {
+            batch = []
+            batchRows = []
+            emitProgress(processedIndex, 'processing')
+          }
+        }
+
+        for (let i = startRowIndex; i < data.length; i++) {
+          const row = data[i]
+          if (!row || row.length === 0) continue
+
+          const canceled = (() => {
+            try { return localStorage.getItem(`importCancel:${importId}`) === '1' } catch { return false }
+          })()
+          if (canceled) {
+            await flush(i - 1)
+            emitProgress(i - 1, 'error', { message: '已取消' })
+            try {
+              localStorage.removeItem(fileKey)
+            } catch {
+            }
+            return { success: successCount, failed: failedCount }
+          }
+
+          await waitIfPaused()
+
+          try {
+            const payload = {
+              year: Number(year),
+              member_id: Number(memberId ?? 0),
+              expense_type: map.type !== undefined ? String(row[map.type] || '常规费用') : '常规费用',
+              project: map.project !== undefined ? String(row[map.project] || '') : '',
+              category: String(row[map.category] || ''),
+              sub_category: map.sub !== undefined ? String(row[map.sub] || '') : '',
+              goal_amount: Number(row[map.amount] || 0),
+            }
+
+            if (!payload.category.trim() || !Number.isFinite(payload.goal_amount)) {
+              failedCount++
+              continue
+            }
+
+            batch.push(payload)
+            batchRows.push(i)
+            if (batch.length >= batchSize) {
+              await flush(i)
+            }
+          } catch {
+            failedCount++
+          }
+        }
+
+        await flush(total)
+        emitDone(total)
+
+        try {
+          localStorage.removeItem(`importCancel:${importId}`)
+          localStorage.removeItem(`importPause:${importId}`)
+        } catch {
+        }
+
         return { success: successCount, failed: failedCount }
-      } catch (e) {
-          return { success: 0, failed: 0 }
+      } catch {
+        return { success: 0, failed: 0 }
       }
   }
 

@@ -32,6 +32,7 @@ interface Window {
       openai: boolean;
       gemini: boolean;
       proxy: string;
+      baseUrl?: string;
       error?: string;
     }>
     downloadTemplate(): Promise<boolean>
@@ -39,6 +40,8 @@ interface Window {
     importExcel(buffer: ArrayBuffer, fileName?: string): Promise<{ importId?: number, status?: string, total?: number, success: number, failed: number, skipped?: number, errors?: { rowNumber: number, message: string }[] }>
     getImportJobStatus(importId: number): Promise<any>
     cancelImportJob(importId: number): Promise<boolean>
+    pauseImportJob?(importId: number): Promise<void>
+    resumeImportJob?(importId: number): Promise<void>
     onImportExcelProgress(func: (payload: any) => void): () => void
     onImportExcelDone(func: (payload: any) => void): () => void
     getExpenseComposition(startDate: string, endDate: string, level?: string, parentValue?: string): Promise<any[]>

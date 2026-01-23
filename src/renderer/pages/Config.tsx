@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import { saveRuntimeConfig, loadRuntimeConfig } from '../lib/runtimeConfig'
+import { useEffect, useMemo, useState } from 'react'
+import { saveRuntimeConfig, loadRuntimeConfig, isSupabaseConfigured, resetRuntimeConfigToDefaults } from '../lib/runtimeConfig'
 
 export default function Config() {
   const initial = useMemo(() => loadRuntimeConfig(), [])
@@ -7,6 +7,12 @@ export default function Config() {
   const [supabaseAnonKey, setSupabaseAnonKey] = useState(initial.supabaseAnonKey || '')
   const [apiBaseUrl, setApiBaseUrl] = useState(initial.apiBaseUrl || '')
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (isSupabaseConfigured()) {
+      window.location.hash = '#/login'
+    }
+  }, [])
 
   const onSave = () => {
     setError('')
@@ -17,7 +23,7 @@ export default function Config() {
     saveRuntimeConfig({
       supabaseUrl: supabaseUrl.trim(),
       supabaseAnonKey: supabaseAnonKey.trim(),
-      apiBaseUrl: apiBaseUrl.trim() || undefined,
+      apiBaseUrl: apiBaseUrl.trim(),
     })
     window.location.hash = '#/login'
     window.location.reload()
@@ -28,7 +34,7 @@ export default function Config() {
       <div className="w-full max-w-lg bg-white rounded-xl shadow-lg p-6">
         <h1 className="text-xl font-bold text-gray-900">首次配置</h1>
         <p className="text-sm text-gray-600 mt-2">
-          你的 App 需要 Supabase 与 AI API 地址才能工作。填好后会自动重启并进入登录页。
+          默认情况下会使用内置配置；如需自部署或调试，再在这里覆盖。
         </p>
 
         <div className="mt-6 space-y-4">
@@ -77,6 +83,15 @@ export default function Config() {
 
         <div className="mt-6 flex gap-3">
           <button
+            onClick={() => {
+              resetRuntimeConfigToDefaults()
+              window.location.reload()
+            }}
+            className="px-4 py-2.5 rounded-lg border border-gray-300 text-gray-700 hover:bg-gray-50 transition-colors font-medium"
+          >
+            恢复默认配置
+          </button>
+          <button
             onClick={onSave}
             className="flex-1 bg-emerald-600 text-white py-2.5 rounded-lg hover:bg-emerald-700 transition-colors font-medium"
           >
@@ -87,4 +102,3 @@ export default function Config() {
     </div>
   )
 }
-

@@ -28,6 +28,8 @@ export default function BudgetConfig() {
   const [month, setMonth] = useState(new Date().getMonth() + 1)
   const [isAdding, setIsAdding] = useState(false)
   const [structure, setStructure] = useState<{ project: string, category: string, sub_category: string }[]>([])
+
+  const [budgetImportJob, setBudgetImportJob] = useState<any | null>(null)
   
   // Expense Types
   const [expenseTypes, setExpenseTypes] = useState<ExpenseType[]>([])
@@ -276,6 +278,43 @@ export default function BudgetConfig() {
     }
     input.click()
   }
+
+  useEffect(() => {
+    const scanActive = () => {
+      try {
+        let best: any | null = null
+        for (let i = 0; i < localStorage.length; i++) {
+          const k = localStorage.key(i)
+          if (!k || !k.startsWith('importJob:')) continue
+          const raw = localStorage.getItem(k)
+          if (!raw) continue
+          try {
+            const parsed = JSON.parse(raw)
+            if (parsed?.importType !== 'budget') continue
+            if (parsed?.status !== 'processing') continue
+            if (!best || Number(parsed?.startedAt || 0) > Number(best?.startedAt || 0)) best = parsed
+          } catch {
+          }
+        }
+        if (best) setBudgetImportJob(best)
+      } catch {
+      }
+    }
+
+    scanActive()
+
+    const off = typeof (window.api as any).onImportExcelProgress === 'function'
+      ? (window.api as any).onImportExcelProgress((payload: any) => {
+          if (payload?.importType === 'budget') setBudgetImportJob(payload)
+        })
+      : null
+
+    const t = window.setInterval(scanActive, 1200)
+    return () => {
+      if (typeof off === 'function') off()
+      window.clearInterval(t)
+    }
+  }, [])
 
   const handleSort = (field: keyof YearGoal) => {
     if (sortField === field) {
@@ -1087,13 +1126,72 @@ export default function BudgetConfig() {
                   </button>
                   <button 
                       onClick={handleImport}
-                      className="h-12 px-6 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all text-xs md:text-sm font-bold flex items-center justify-center gap-2 shadow-md shadow-blue-200 whitespace-nowrap active:scale-[0.98]"
+                      className="h-12 px-6 bg-blue-600 text-white rounded-xl hover:bg-blue-700 transition-all text-xs md:text-sm font-bold flex items-center justify-center gap-2 shadow-md shadow-blue-200 whitespace-nowrap active:scale-[0.98] disabled:opacity-50 disabled:cursor-not-allowed"
+                      disabled={budgetImportJob?.status === 'processing'}
                   >
                       <Upload className="w-4 h-4" />
-                      上传 Excel
+                      {budgetImportJob?.status === 'processing' ? '导入中...' : '上传 Excel'}
                   </button>
               </div>
             </div>
+
+            {budgetImportJob?.status === 'processing' && (
+              <div className="mt-4 bg-white/70 border border-blue-100 rounded-xl p-4">
+                {(() => {
+                  const total = Number(budgetImportJob.total || 0)
+                  const processed = Number(budgetImportJob.processed || 0)
+                  const pct = total > 0 ? Math.min(100, Math.round((processed / total) * 100)) : 0
+                  const startedAt = Number(budgetImportJob.startedAt || 0)
+                  const elapsedSec = startedAt ? Math.max(1, (Date.now() - startedAt) / 1000) : 1
+                  const speed = processed / elapsedSec
+                  const remaining = Math.max(0, total - processed)
+                  const etaSec = speed > 0 ? Math.round(remaining / speed) : 0
+                  const etaText = etaSec > 0 ? `${Math.floor(etaSec / 60)}m${etaSec % 60}s` : '-'
+                  const paused = !!budgetImportJob.paused
+                  return (
+                    <>
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="text-sm font-bold text-blue-900 whitespace-nowrap">正在导入预算... {pct}%（{processed}/{total}）</div>
+                        <div className="flex items-center gap-3">
+                          {typeof (window.api as any).pauseImportJob === 'function' && typeof (window.api as any).resumeImportJob === 'function' && (
+                            <button
+                              onClick={async () => {
+                                if (paused) await (window.api as any).resumeImportJob(budgetImportJob.importId)
+                                else await (window.api as any).pauseImportJob(budgetImportJob.importId)
+                              }}
+                              className="text-xs text-blue-700 hover:text-blue-900 underline whitespace-nowrap"
+                            >
+                              {paused ? '继续' : '暂停'}
+                            </button>
+                          )}
+                          {typeof (window.api as any).cancelImportJob === 'function' && (
+                            <button
+                              onClick={async () => {
+                                if (!confirm('确定要取消本次预算导入吗？')) return
+                                await (window.api as any).cancelImportJob(budgetImportJob.importId)
+                                setBudgetImportJob(null)
+                              }}
+                              className="text-xs text-blue-700 hover:text-blue-900 underline whitespace-nowrap"
+                            >
+                              取消
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                      <div className="mt-2 h-2 bg-blue-100 rounded">
+                        <div className="h-2 bg-blue-500 rounded" style={{ width: `${pct}%` }} />
+                      </div>
+                      <div className="mt-2 text-xs text-blue-700 flex flex-wrap gap-x-3 gap-y-1">
+                        <span className="whitespace-nowrap">成功: {budgetImportJob.success || 0}</span>
+                        <span className="whitespace-nowrap">失败: {budgetImportJob.failed || 0}</span>
+                        <span className="whitespace-nowrap">速度: {speed.toFixed(1)} 行/秒</span>
+                        <span className="whitespace-nowrap">剩余: {etaText}</span>
+                      </div>
+                    </>
+                  )
+                })()}
+              </div>
+            )}
         </div>
       )}
 
