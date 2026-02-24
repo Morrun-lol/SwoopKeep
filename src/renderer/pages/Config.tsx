@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { saveRuntimeConfig, loadRuntimeConfig, isSupabaseConfigured, resetRuntimeConfigToDefaults } from '../lib/runtimeConfig'
+import { useMemo, useState } from 'react'
+import { saveRuntimeConfig, loadRuntimeConfig, resetRuntimeConfigToDefaults } from '../lib/runtimeConfig'
 
 export default function Config() {
   const initial = useMemo(() => loadRuntimeConfig(), [])
@@ -7,12 +7,6 @@ export default function Config() {
   const [supabaseAnonKey, setSupabaseAnonKey] = useState(initial.supabaseAnonKey || '')
   const [apiBaseUrl, setApiBaseUrl] = useState(initial.apiBaseUrl || '')
   const [error, setError] = useState('')
-
-  useEffect(() => {
-    if (isSupabaseConfigured()) {
-      window.location.hash = '#/login'
-    }
-  }, [])
 
   const onSave = () => {
     setError('')

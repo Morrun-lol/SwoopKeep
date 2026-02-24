@@ -10,7 +10,7 @@ const DEFAULTS: RuntimeConfig = {
   supabaseUrl: 'https://rzzvbzwcxglqahuyazqh.supabase.co',
   supabaseAnonKey:
     'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJ6enZiendjeGdscWFodXlhenFoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NjgzNzExOTAsImV4cCI6MjA4Mzk0NzE5MH0.gK7UyLmsDvR8B_tZi_G40nLDfib5RTQQ1pJON9R5p4g',
-  apiBaseUrl: 'http://8.130.69.127:3001,https://trae36celz3m.vercel.app',
+  apiBaseUrl: 'http://112.124.48.175',
 }
 
 export const loadRuntimeConfig = (): RuntimeConfig => {

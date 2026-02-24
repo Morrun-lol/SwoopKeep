@@ -83,7 +83,7 @@ jobs:
     - name: Build Web Assets
       run: npm run build:web
       env:
-        VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || secrets.VITE_API_BASE_URL || 'http://8.130.69.127:3001' }}
+        VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL || secrets.VITE_API_BASE_URL || 'http://112.124.48.175' }}
       
     - name: Sync Capacitor iOS
       run: |
@@ -205,7 +205,6 @@ jobs:
         
         if [ ! -d "App.xcworkspace" ]; then
           echo "Error: Workspace not found! CocoaPods install failed."
-          # Debug: list what IS here
           ls -R .
           exit 1
         fi
@@ -232,7 +231,6 @@ jobs:
     - name: Package Simulator App
       run: |
         cd ios/App
-        # Compress the .app for Simulator (Debug folder)
         cd build/DerivedData/Build/Products/Debug-iphonesimulator
         zip -r App-Simulator.zip App.app
 
